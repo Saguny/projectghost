@@ -47,10 +47,19 @@ class CryostasisConfig:
 class MemoryConfig:
     """Memory system configuration."""
     vector_db_path: str = "data/vector_db"
-    episodic_buffer_size: int = 20
-    semantic_search_limit: int = 5
+    episodic_buffer_size: int = 50  # Increased from 20
+    semantic_search_limit: int = 8  # Increased from 5
     embedding_model: str = "all-MiniLM-L6-v2"
-
+    
+    # NEW: Advanced memory settings
+    enable_hierarchical: bool = True
+    consolidation_threshold: int = 50
+    enable_summarization: bool = True
+    enable_importance_scoring: bool = True
+    importance_threshold: float = 0.4
+    enable_redis_cache: bool = False  # Optional
+    redis_url: str = "redis://localhost:6379"
+    max_context_tokens: int = 3000
 
 @dataclass
 class AutonomyConfig:

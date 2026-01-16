@@ -31,12 +31,12 @@ class PromptBuilder:
         recent_messages: List[Message],
         relevant_memories: List[Message],
         emotional_context: dict,
-        sensory_context: str
+        sensory_context: str,
+        max_tokens: int = 3000
     ) -> List[Message]:
-        """Build complete conversation context."""
+        """Build complete conversation context with token management."""
         messages = []
         
-        # System message with dynamic context
         system_content = self._build_system_prompt(
             emotional_context,
             sensory_context,
@@ -48,10 +48,23 @@ class PromptBuilder:
             metadata={}
         ))
         
-        # Add recent conversation
-        messages.extend(recent_messages[-8:])  # Last 8 messages
+        token_count = self._estimate_tokens(system_content)
+        selected_messages = []
         
+        for msg in reversed(recent_messages[-15:]):
+            msg_tokens = self._estimate_tokens(msg.content)
+            if token_count + msg_tokens < max_tokens:
+                selected_messages.insert(0, msg)
+                token_count += msg_tokens
+            else:
+                break
+        
+        messages.extend(selected_messages)
         return messages
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimation (1 token ≈ 4 chars for English)."""
+        return len(text) // 4
     
     def _build_system_prompt(
         self,
@@ -59,10 +72,9 @@ class PromptBuilder:
         sensory_context: str,
         relevant_memories: List[Message]
     ) -> str:
-        """Build dynamic system prompt."""
+        """Build dynamic system prompt with memory emphasis."""
         base_prompt = self.persona_config.system_prompt
         
-        # Add emotional context
         mood_desc = emotional_context.get('mood_description', 'neutral')
         circadian = emotional_context.get('circadian_phase', 'daytime')
         
@@ -70,17 +82,24 @@ class PromptBuilder:
 Current Emotional State: {mood_desc}
 Time Context: {circadian}
 
-Respond naturally according to this emotional state. If you're feeling low energy, keep responses brief. If you're in a good mood, be more expressive.
+Respond naturally according to this emotional state.
 """
         
-        # Add relevant memories if any
+        # Integrate memories into narrative
         memory_context = ""
         if relevant_memories:
-            memory_context = "\n\nRelevant Past Context:\n"
-            for mem in relevant_memories[:3]:  # Top 3 most relevant
-                memory_context += f"- {mem.content}\n"
-        
-        # Combine all parts
+            memory_context = "\n\n=== IMPORTANT CONTEXT FROM PAST CONVERSATIONS ===\n"
+            memory_context += "Remember and reference these details when relevant:\n\n"
+            
+            for i, mem in enumerate(relevant_memories[:5], 1):
+                # Extract content without "UserName:" prefix if present
+                content = mem.content.split(": ", 1)[-1] if ": " in mem.content else mem.content
+                memory_context += f"{i}. {content}\n"
+            
+            memory_context += "\n" + "=" * 50 + "\n"
+            memory_context += "☞ Reference these memories naturally when they're relevant to the current conversation.\n"
+            memory_context += "☞ If the user mentions something you discussed before, acknowledge it.\n"
+    
         full_prompt = f"""{base_prompt}
 
 {emotional_instruction}
@@ -88,8 +107,13 @@ Respond naturally according to this emotional state. If you're feeling low energ
 {sensory_context}
 {memory_context}
 
-Remember: You are a companion, not an assistant. Respond naturally and personally."""
-        
+CRITICAL INSTRUCTIONS:
+- You have access to past conversation context above
+- Reference previous discussions naturally when relevant
+- If user says "remember when..." or "like I mentioned", use the context
+- Maintain continuity across conversations
+- You are a companion with memory, not a stateless assistant"""
+    
         return full_prompt.strip()
     
     def build_impulse_prompt(

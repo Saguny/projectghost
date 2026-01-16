@@ -1,9 +1,10 @@
 """Vector database for semantic memory storage."""
 
-from typing import List, Dict, Any
 import logging
-from pathlib import Path
 import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
 
 try:
     import chromadb
@@ -73,10 +74,15 @@ class VectorStore:
         except Exception as e:
             logger.error(f"Failed to add to vector store: {e}", exc_info=True)
     
-    async def search(self, query: str, limit: int = 5) -> List[Message]:
-        """Search for semantically similar messages."""
+    async def search(
+        self, 
+        query: str, 
+        limit: int = 5,
+        rerank: bool = True,
+        time_weight: float = 0.3
+    ) -> List[Message]:
+        """Search with reranking and recency weighting."""
         if self._fallback_mode:
-            # Simple substring match fallback
             results = [
                 msg for msg in self._fallback_store
                 if query.lower() in msg.content.lower()
@@ -84,30 +90,57 @@ class VectorStore:
             return results[:limit]
         
         try:
-            # Generate query embedding
             query_embedding = self.embedder.encode(query).tolist()
             
-            # Search ChromaDB
+            # Retrieve 3x more candidates for reranking
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=limit
+                n_results=limit * 3
             )
             
-            # Convert to Message objects
-            messages = []
-            if results['documents']:
-                for doc, metadata in zip(results['documents'][0], results['metadatas'][0]):
-                    role = metadata.pop('role', 'unknown')
-                    messages.append(Message(
-                        role=role,
-                        content=doc,
-                        metadata=metadata
-                    ))
+            if not results['documents']:
+                return []
             
-            return messages
+            scored_messages = []
+            for doc, metadata, distance in zip(
+                results['documents'][0], 
+                results['metadatas'][0],
+                results['distances'][0]
+            ):
+                role = metadata.pop('role', 'unknown')
+                
+                # Calculate recency score
+                timestamp = metadata.get('timestamp', '')
+                recency_score = self._calculate_recency_score(timestamp)
+                
+                # Combined score: semantic similarity + recency
+                relevance = 1 - distance  # Convert distance to similarity
+                final_score = (1 - time_weight) * relevance + time_weight * recency_score
+                
+                scored_messages.append((
+                    final_score,
+                    Message(role=role, content=doc, metadata=metadata)
+                ))
+            
+            # Sort by score and return top results
+            scored_messages.sort(reverse=True, key=lambda x: x[0])
+            return [msg for _, msg in scored_messages[:limit]]
+            
         except Exception as e:
             logger.error(f"Vector search failed: {e}", exc_info=True)
             return []
+
+    def _calculate_recency_score(self, timestamp: str) -> float:
+        """Calculate recency score (1.0 = now, 0.0 = very old)."""
+        try:
+            msg_time = datetime.fromisoformat(timestamp)
+            age = (datetime.utcnow() - msg_time).total_seconds()
+            
+            # Exponential decay: half-life of 7 days
+            half_life = 7 * 24 * 3600
+            return 0.5 ** (age / half_life)
+        except:
+            return 0.5
     
     async def clear(self) -> None:
         """Clear all stored memories."""
@@ -117,7 +150,7 @@ class VectorStore:
         
         try:
             self.client.delete_collection("ghost_memories")
-            self.collection = self.client.create_collection("ghost_memories")
+            self.collection = self.client.get_or_create_collection("ghost_memories")
             logger.info("Vector store cleared")
         except Exception as e:
             logger.error(f"Failed to clear vector store: {e}", exc_info=True)
