@@ -1,0 +1,19 @@
+# Core Dependencies
+discord.py>=2.3.2
+aiohttp>=3.9.1
+python-dotenv>=1.0.0
+pyyaml>=6.0.1
+
+# Resource Monitoring
+psutil>=5.9.8
+nvidia-ml-py>=12.535.0
+
+# Memory & Embeddings
+chromadb>=0.4.22
+sentence-transformers>=2.3.1
+
+# Retry Logic
+tenacity>=8.2.3
+
+# Data Processing
+numpy>=1.24.0

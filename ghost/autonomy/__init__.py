@@ -1,0 +1,1 @@
+"""Autonomy module for proactive AI behavior."""

@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  ghost:
+    build: .
+    container_name: project_ghost
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    restart: unless-stopped
+    # For GPU access (requires nvidia-container-toolkit)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    # Connect to Ollama on host
+    network_mode: host

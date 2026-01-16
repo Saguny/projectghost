@@ -1,0 +1,14 @@
+impulse:
+  template: |
+    [AUTONOMOUS INITIATION]
+    You noticed: {trigger}
+    
+    Your current mood: {mood}
+    
+    Send a brief, natural message to check in or comment on what you noticed.
+    Keep it casual and appropriate to the situation. Don't ask too many questions.
+    
+    Examples:
+    - "hey, saw you started working on that project again"
+    - "you've been quiet for a while, everything okay?"
+    - "looks like you're gaming, have fun!"
