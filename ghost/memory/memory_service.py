@@ -24,23 +24,21 @@ class MemoryService(IMemoryProvider):
             embedding_model=config.embedding_model
         )
         self.episodic_buffer = EpisodicBuffer(max_size=config.episodic_buffer_size)
+        from ghost.memory.hierarchical_memory import HierarchicalMemory
+        self.hierarchical = HierarchicalMemory(
+            self.episodic_buffer,
+            self.vector_store,
+            consolidation_threshold=50
+        )
+        
         self._snapshot_path = Path("data/memory_snapshots")
         self._snapshot_path.mkdir(parents=True, exist_ok=True)
-        logger.info("Memory service initialized")
-    
+        logger.info("Memory service initialized with hierarchical memory")
+
+
     async def add_message(self, message: Message) -> None:
-        """Store message in both episodic buffer and vector store."""
-        try:
-            # Add to episodic buffer (recent context)
-            self.episodic_buffer.add(message)
-            
-            # Add to vector store (long-term semantic memory)
-            await self.vector_store.add_message(message)
-            
-            logger.debug(f"Stored message: {message.role[:4]}...")
-        except Exception as e:
-            logger.error(f"Failed to store message: {e}", exc_info=True)
-            raise
+        """Store message in hierarchical memory system."""
+        await self.hierarchical.add_message(message)
     
     async def search_semantic(self, query: str, limit: int = 5) -> List[Message]:
         """Search for semantically similar messages."""
@@ -51,8 +49,22 @@ class MemoryService(IMemoryProvider):
             return []
     
     async def get_recent(self, limit: int = 10) -> List[Message]:
-        """Get recent messages from episodic buffer."""
-        return self.episodic_buffer.get_recent(limit)
+        """Get recent messages from working + episodic memory."""
+        context = await self.hierarchical.get_context("", include_working=True)
+        working = context['working']
+        episodic = context['episodic']
+        
+        # Combine and deduplicate
+        all_messages = working + episodic
+        seen = set()
+        unique = []
+        for msg in reversed(all_messages):
+            key = (msg.role, msg.content)
+            if key not in seen:
+                seen.add(key)
+                unique.insert(0, msg)
+        
+        return unique[-limit:]
     
     async def clear(self) -> None:
         """Clear all memory (use with caution)."""
