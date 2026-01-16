@@ -2,13 +2,8 @@
 
 import asyncio
 import logging
-from logging import config
 import sys
 from pathlib import Path
-
-from networkx import config
-
-from ghost import emotion
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -25,6 +20,7 @@ from ghost.integrations.discord_adapter import DiscordAdapter
 from ghost.sensors.hardware_sensor import HardwareSensor
 from ghost.sensors.time_sensor import TimeSensor
 from ghost.utils.logging_config import setup_logging
+from ghost.utils.validation import validate_discord_token, ValidationError
 from ghost.autonomy.autonomy_engine import AutonomyEngine
 
 logger = logging.getLogger(__name__)
@@ -46,13 +42,28 @@ async def main():
             logger.error(f"  - {error}")
         sys.exit(1)
     
+    # Validate Discord token format
+    try:
+        if not validate_discord_token(config.discord.token):
+            logger.error("Invalid Discord token format")
+            sys.exit(1)
+    except ValidationError as e:
+        logger.error(f"Token validation failed: {e}")
+        sys.exit(1)
+    
     logger.info("=" * 60)
     logger.info("Project Ghost Initializing")
     logger.info("=" * 60)
     
+    # Service references for cleanup
+    event_bus = None
+    autonomy_engine = None
+    cryostasis = None
+    discord_adapter = None
+    
     try:
         # Initialize event bus
-        event_bus = EventBus()
+        event_bus = EventBus(max_queue_size=1000)
         await event_bus.start()
         
         # Initialize core services
@@ -61,9 +72,8 @@ async def main():
         
         ollama_client = OllamaClient(config.ollama)
         inference = InferenceService(config.ollama, config.persona)
-        autonomy_engine = AutonomyEngine(config.autonomy, event_bus, emotion)
-        await autonomy_engine.start()
-
+        
+        # Initialize cryostasis
         cryostasis = CryostasisController(
             config.cryostasis,
             ollama_client,
@@ -87,6 +97,14 @@ async def main():
             sensors=sensors
         )
         
+        # Initialize autonomy engine (must be after orchestrator)
+        autonomy_engine = AutonomyEngine(
+            config.autonomy,
+            event_bus,
+            emotion
+        )
+        await autonomy_engine.start()
+        
         # Initialize Discord
         discord_adapter = DiscordAdapter(
             config.discord,
@@ -99,8 +117,9 @@ async def main():
         health = await orchestrator.health_check()
         logger.info(f"Health check: {health}")
         
-        if not health['inference_available']:
+        if not health.get('inference_available', False):
             logger.warning("Ollama not available! Bot will have limited functionality.")
+            logger.warning("Make sure Ollama is running: ollama serve")
         
         # Start cryostasis monitoring
         await cryostasis.start_monitoring()
@@ -119,10 +138,20 @@ async def main():
         sys.exit(1)
     finally:
         logger.info("Shutting down...")
-        await event_bus.stop()
-        await autonomy_engine.stop()
+        
+        # Graceful shutdown in reverse order
+        if autonomy_engine:
+            await autonomy_engine.stop()
+        
+        if discord_adapter and discord_adapter.is_ready():
+            await discord_adapter.close()
+        
         if cryostasis:
             await cryostasis.stop_monitoring()
+        
+        if event_bus:
+            await event_bus.stop()
+        
         logger.info("Shutdown complete")
 
 

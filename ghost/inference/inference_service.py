@@ -1,6 +1,6 @@
 """Inference service coordinating LLM generation."""
 
-from typing import List
+from typing import List, Optional
 import logging
 
 from ghost.core.interfaces import IInferenceEngine, Message
@@ -32,7 +32,7 @@ class InferenceService(IInferenceEngine):
     async def generate(
         self,
         messages: List[Message],
-        temperature: float = None,
+        temperature: Optional[float] = None,
         max_tokens: int = 500
     ) -> str:
         """Generate a response using the LLM."""
@@ -77,15 +77,17 @@ class InferenceService(IInferenceEngine):
     
     def build_conversation_context(
         self,
-        recent_messages: List[Message],
-        relevant_memories: List[Message],
+        working_memory: List[Message],
+        episodic_memory: List[Message],
+        semantic_memory: List[Message],
         emotional_context: dict,
         sensory_context: str
     ) -> List[Message]:
         """Build complete conversation context for generation."""
-        return self.prompt_builder.build_context(
-            recent_messages=recent_messages,
-            relevant_memories=relevant_memories,
+        return self.prompt_builder.build_conversation_context(
+            working_memory=working_memory,
+            episodic_memory=episodic_memory,
+            semantic_memory=semantic_memory,
             emotional_context=emotional_context,
             sensory_context=sensory_context
         )

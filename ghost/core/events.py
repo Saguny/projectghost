@@ -1,7 +1,7 @@
 """Event system for decoupled communication between components."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Type
 from enum import Enum
 import asyncio
@@ -18,15 +18,13 @@ class EventPriority(Enum):
     CRITICAL = 3
 
 
-# --- FIX APPLIED HERE: kw_only=True ---
-@dataclass(kw_only=True)
+@dataclass
 class Event:
     """Base event class.
     
-    kw_only=True is required here because subclasses have fields without defaults.
-    This moves timestamp, priority, and metadata to the end of the __init__ arguments.
+    Note: All fields have defaults to allow subclasses to add required fields.
     """
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     priority: EventPriority = EventPriority.NORMAL
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -34,69 +32,77 @@ class Event:
 @dataclass
 class MessageReceived(Event):
     """User message received."""
-    user_id: str
-    user_name: str
-    content: str
-    channel_id: str
+    user_id: str = ""
+    user_name: str = ""
+    content: str = ""
+    channel_id: str = ""
 
 
 @dataclass
 class ResponseGenerated(Event):
     """AI response generated."""
-    content: str
-    context_used: List[str]
-    generation_time_ms: float
+    content: str = ""
+    context_used: List[str] = field(default_factory=list)
+    generation_time_ms: float = 0.0
 
 
 @dataclass
 class EmotionalStateChanged(Event):
     """Emotional state transition."""
-    old_pleasure: float
-    old_arousal: float
-    old_dominance: float
-    new_pleasure: float
-    new_arousal: float
-    new_dominance: float
-    trigger: str
+    old_pleasure: float = 0.0
+    old_arousal: float = 0.0
+    old_dominance: float = 0.0
+    new_pleasure: float = 0.0
+    new_arousal: float = 0.0
+    new_dominance: float = 0.0
+    trigger: str = ""
 
 
 @dataclass
 class SystemResourceAlert(Event):
     """System resource threshold exceeded."""
-    resource_type: str  # 'gpu', 'cpu', 'memory'
-    current_value: float
-    threshold: float
-    action_taken: str
+    resource_type: str = ""  # 'gpu', 'cpu', 'memory'
+    current_value: float = 0.0
+    threshold: float = 0.0
+    action_taken: str = ""
 
 
 @dataclass
 class CryostasisActivated(Event):
     """Model unloaded from memory."""
-    reason: str
-    memory_freed_mb: float
+    reason: str = ""
+    memory_freed_mb: float = 0.0
 
 
 @dataclass
 class CryostasisDeactivated(Event):
     """Model loaded back into memory."""
-    load_time_ms: float
+    load_time_ms: float = 0.0
 
 
 @dataclass
 class ProactiveImpulse(Event):
     """AI decided to initiate conversation."""
-    trigger_reason: str
-    confidence: float
+    trigger_reason: str = ""
+    confidence: float = 0.0
+
+
+@dataclass
+class AutonomousMessageSent(Event):
+    """Autonomous message was sent to Discord."""
+    content: str = ""
+    channel_id: str = ""
 
 
 class EventBus:
-    """Central event bus for system-wide communication."""
+    """Central event bus for system-wide communication with backpressure."""
     
-    def __init__(self):
+    def __init__(self, max_queue_size: int = 1000):
         self._handlers: Dict[Type[Event], List[Callable]] = {}
-        self._queue: asyncio.Queue = asyncio.Queue()
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
         self._running = False
         self._task = None
+        logger.info(f"Event bus initialized (max_queue_size={max_queue_size})")
     
     def subscribe(self, event_type: Type[Event], handler: Callable):
         """Register an event handler."""
@@ -112,7 +118,10 @@ class EventBus:
     
     async def publish(self, event: Event):
         """Publish an event to all subscribers."""
-        await self._queue.put(event)
+        try:
+            await asyncio.wait_for(self._queue.put(event), timeout=1.0)
+        except asyncio.TimeoutError:
+            logger.error(f"Event queue full, dropping {type(event).__name__}")
     
     async def start(self):
         """Start processing events."""
@@ -124,7 +133,11 @@ class EventBus:
         """Stop processing events."""
         self._running = False
         if self._task:
-            await self._task
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
         logger.info("Event bus stopped")
     
     async def _process_events(self):
@@ -139,7 +152,7 @@ class EventBus:
                 logger.error(f"Error processing event: {e}", exc_info=True)
     
     async def _dispatch(self, event: Event):
-        """Dispatch event to handlers."""
+        """Dispatch event to handlers with error isolation."""
         event_type = type(event)
         handlers = self._handlers.get(event_type, [])
         

@@ -3,10 +3,10 @@
 import asyncio
 import logging
 import random
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from ghost.core.events import EventBus, ProactiveImpulse
+from ghost.core.events import EventBus, ProactiveImpulse, MessageReceived
 from ghost.core.config import AutonomyConfig
 from ghost.emotion.emotion_service import EmotionService
 from ghost.autonomy.triggers import TriggerEvaluator
@@ -26,11 +26,16 @@ class AutonomyEngine:
         self.config = config
         self.event_bus = event_bus
         self.emotion_service = emotion_service
-        self.trigger_evaluator = TriggerEvaluator()
+        self.trigger_evaluator = TriggerEvaluator(
+            silence_threshold_minutes=config.silence_threshold_minutes
+        )
         
         self._monitoring_task: Optional[asyncio.Task] = None
         self._last_initiation_time: Optional[datetime] = None
         self._running = False
+        
+        # Subscribe to message events to track activity
+        self.event_bus.subscribe(MessageReceived, self._on_message_received)
         
         logger.info("Autonomy engine initialized")
     
@@ -55,6 +60,11 @@ class AutonomyEngine:
                 pass
         logger.info("Autonomy engine stopped")
     
+    async def _on_message_received(self, event: MessageReceived):
+        """Update trigger state when messages are received."""
+        self.trigger_evaluator.update_last_message_time()
+        logger.debug("Updated last message time for autonomy triggers")
+    
     async def _autonomy_loop(self):
         """Main autonomy monitoring loop."""
         while self._running:
@@ -73,7 +83,7 @@ class AutonomyEngine:
         """Determine if AI should initiate conversation."""
         # Check minimum interval
         if self._last_initiation_time:
-            time_since_last = datetime.now() - self._last_initiation_time
+            time_since_last = datetime.now(timezone.utc) - self._last_initiation_time
             min_interval = timedelta(minutes=self.config.min_interval_minutes)
             
             if time_since_last < min_interval:
@@ -95,7 +105,7 @@ class AutonomyEngine:
         trigger_result = await self.trigger_evaluator.evaluate()
         
         if trigger_result:
-            logger.info(f"Autonomy trigger: {trigger_result}")
+            logger.info(f"Autonomy trigger fired: {trigger_result}")
             return True
         
         return False
@@ -107,11 +117,11 @@ class AutonomyEngine:
         if not trigger_reason:
             trigger_reason = "spontaneous check-in"
         
-        # Emit impulse event
+        # Emit impulse event (orchestrator will handle generation and Discord will send)
         await self.event_bus.publish(ProactiveImpulse(
             trigger_reason=trigger_reason,
             confidence=0.7
         ))
         
-        self._last_initiation_time = datetime.now()
+        self._last_initiation_time = datetime.now(timezone.utc)
         logger.info(f"Initiated autonomous conversation: {trigger_reason}")

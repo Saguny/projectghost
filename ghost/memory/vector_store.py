@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -10,7 +10,6 @@ try:
     import chromadb
     from chromadb.config import Settings
     from sentence_transformers import SentenceTransformer
-
     VECTOR_DB_AVAILABLE = True
 except ImportError:
     VECTOR_DB_AVAILABLE = False
@@ -24,9 +23,15 @@ logger = logging.getLogger(__name__)
 class VectorStore:
     """Manages semantic memory using ChromaDB."""
 
-    def __init__(self, persist_directory: str, embedding_model: str):
+    def __init__(
+        self,
+        persist_directory: str,
+        embedding_model: str,
+        importance_threshold: float = 0.4
+    ):
         self.persist_directory = Path(persist_directory)
         self.persist_directory.mkdir(parents=True, exist_ok=True)
+        self.importance_threshold = importance_threshold
 
         if not VECTOR_DB_AVAILABLE:
             logger.warning("ChromaDB not available, using fallback memory")
@@ -49,12 +54,17 @@ class VectorStore:
 
         # Initialize embedding model
         self.embedder = SentenceTransformer(embedding_model)
-        logger.info(f"Vector store initialized with {embedding_model}")
+        logger.info(
+            f"Vector store initialized with {embedding_model} "
+            f"(importance_threshold={importance_threshold})"
+        )
 
     async def add_message(self, message: Message) -> None:
         """Add message with importance scoring."""
         if self._fallback_mode:
             self._fallback_store.append(message)
+            if len(self._fallback_store) > 1000:
+                self._fallback_store.pop(0)
             return
 
         try:
@@ -62,9 +72,12 @@ class VectorStore:
             scorer = ImportanceScorer()
             importance = scorer.score_message(message)
 
-            # Only store if important enough (threshold: 0.4)
-            if importance < 0.4:
-                logger.debug(f"Skipping low-importance message (score: {importance:.2f})")
+            # Only store if important enough
+            if importance < self.importance_threshold:
+                logger.debug(
+                    f"Skipping low-importance message "
+                    f"(score: {importance:.2f} < threshold: {self.importance_threshold})"
+                )
                 return
 
             # Add importance to metadata
@@ -73,10 +86,11 @@ class VectorStore:
             # Generate embedding
             embedding = self.embedder.encode(message.content).tolist()
 
-            # Prepare metadata
+            # Prepare metadata (convert datetime to string)
             metadata = {
                 "role": message.role,
-                **message.metadata
+                **{k: str(v) if isinstance(v, datetime) else v 
+                   for k, v in message.metadata.items()}
             }
 
             # Store in ChromaDB
@@ -101,22 +115,24 @@ class VectorStore:
     ) -> List[Message]:
         """Search with reranking and recency weighting."""
         if self._fallback_mode:
+            # Simple text search in fallback mode
             results = [
                 msg for msg in self._fallback_store
                 if query.lower() in msg.content.lower()
             ]
-            return results[:limit]
+            return results[-limit:] if results else []
 
         try:
             query_embedding = self.embedder.encode(query).tolist()
 
-            # Retrieve 3x more candidates for reranking
+            # Retrieve more candidates for reranking
+            n_results = limit * 3 if rerank else limit
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=limit * 3
+                n_results=n_results
             )
 
-            if not results["documents"]:
+            if not results["documents"] or not results["documents"][0]:
                 return []
 
             scored_messages = []
@@ -126,6 +142,13 @@ class VectorStore:
                 results["distances"][0]
             ):
                 role = metadata.pop("role", "unknown")
+                
+                # Convert importance back to float if it exists
+                if "importance" in metadata and isinstance(metadata["importance"], str):
+                    try:
+                        metadata["importance"] = float(metadata["importance"])
+                    except (ValueError, TypeError):
+                        pass
 
                 # Calculate recency score
                 timestamp = metadata.get("timestamp", "")
@@ -151,12 +174,16 @@ class VectorStore:
         """Calculate recency score (1.0 = now, 0.0 = very old)."""
         try:
             msg_time = datetime.fromisoformat(timestamp)
-            age = (datetime.utcnow() - msg_time).total_seconds()
+            # Make msg_time timezone-aware if it isn't
+            if msg_time.tzinfo is None:
+                msg_time = msg_time.replace(tzinfo=timezone.utc)
+            
+            age = (datetime.now(timezone.utc) - msg_time).total_seconds()
 
             # Exponential decay: half-life of 7 days
             half_life = 7 * 24 * 3600
             return 0.5 ** (age / half_life)
-        except Exception:
+        except (ValueError, TypeError):
             return 0.5
 
     async def clear(self) -> None:
@@ -167,7 +194,10 @@ class VectorStore:
 
         try:
             self.client.delete_collection("ghost_memories")
-            self.collection = self.client.get_or_create_collection("ghost_memories")
+            self.collection = self.client.get_or_create_collection(
+                "ghost_memories",
+                metadata={"hnsw:space": "cosine"}
+            )
             logger.info("Vector store cleared")
         except Exception as e:
             logger.error(f"Failed to clear vector store: {e}", exc_info=True)
@@ -185,7 +215,8 @@ class VectorStore:
             return {
                 "total_memories": count,
                 "fallback_mode": False,
-                "collection_name": self.collection.name
+                "collection_name": self.collection.name,
+                "importance_threshold": self.importance_threshold
             }
         except Exception as e:
             logger.error(f"Failed to get stats: {e}", exc_info=True)
