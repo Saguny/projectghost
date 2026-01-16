@@ -298,5 +298,3 @@ MIT License - See LICENSE file
 ## Support
 
 - Issues: GitHub Issues
-- Discord: [Your Server]
-- Docs: [Wiki Link]
