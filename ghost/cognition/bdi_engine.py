@@ -1,26 +1,32 @@
 """
-BDI Engine: Belief-Desire-Intention Autonomy
+BDI Engine: Belief-Desire-Intention Autonomy (Sentience Upgrade)
+
+NEW FEATURES:
+1. Metabolic Decay: Needs decay over real time (not per-message)
+2. Consequential Triggers: Needs directly cause behavior
+3. Energy Gating: Low energy can cause task refusal
+4. Social Starvation: Prolonged isolation triggers contact attempts
 
 Architecture:
     Beliefs (what agent knows) → Knowledge graph
-    Desires (internal needs) → Drive system
-    Intentions (planned actions) → Goal queue
+    Desires (internal needs) → Drive system (NOW WITH DECAY)
+    Intentions (planned actions) → Goal queue (NOW EXECUTED)
     
-Needs (decay over time):
-    - Social: Need for interaction
-    - Curiosity: Desire to learn
-    - Energy: Computational capacity
-    - Affiliation: Bond with user
+Needs (decay over TIME):
+    - Social: Need for interaction (decays hourly)
+    - Curiosity: Desire to learn (decays hourly)
+    - Energy: Computational capacity (consumed by tasks)
+    - Affiliation: Bond with user (decays when ignored)
     
 Intentions (goal-driven):
-    - Initiate conversation
-    - Ask question
-    - Share thought
-    - Request activity
-    - Rest (when low energy)
+    - Initiate conversation (social starvation)
+    - Ask question (curiosity)
+    - Share thought (affiliation)
+    - Rest (low energy)
+    - Refuse task (critical energy)
     
 Decision Logic:
-    needs → desires → intentions → actions
+    needs → desires → intentions → actions (REAL CONSEQUENCES)
 """
 
 import logging
@@ -38,24 +44,26 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Need:
-    """Internal need/drive"""
+    """Internal need/drive with TIME-BASED decay"""
     name: str
     value: float  # 0.0 (satisfied) to 1.0 (critical)
     decay_rate: float  # Per hour
     threshold_trigger: float  # Value that triggers action
     last_satisfied: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_decay: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     
     def decay(self, hours: float):
-        """Increase need over time"""
+        """Increase need over time."""
         self.value = min(1.0, self.value + (self.decay_rate * hours))
+        self.last_decay = datetime.now(timezone.utc)
     
     def satisfy(self, amount: float):
-        """Reduce need (action taken)"""
+        """Reduce need (action taken)."""
         self.value = max(0.0, self.value - amount)
         self.last_satisfied = datetime.now(timezone.utc)
     
     def is_critical(self) -> bool:
-        """Check if need requires attention"""
+        """Check if need requires attention."""
         return self.value >= self.threshold_trigger
 
 
@@ -71,13 +79,13 @@ class Intention:
 
 class BDIEngine:
     """
-    Belief-Desire-Intention autonomous agent.
+    Belief-Desire-Intention autonomous agent with METABOLIC DECAY.
     
     Cycle:
-        1. Update beliefs (from memory/events)
+        1. Update needs (TIME-BASED decay)
         2. Evaluate desires (check need levels)
         3. Generate intentions (plan actions)
-        4. Execute intentions (autonomous behavior)
+        4. Execute intentions (autonomous behavior with CONSEQUENCES)
     """
     
     def __init__(
@@ -105,64 +113,60 @@ class BDIEngine:
         self._state_file = Path("data/bdi_state.json")
         self._load_state()
         
-        logger.info("BDI engine initialized")
+        logger.info("BDI engine initialized with metabolic decay")
     
     def _initialize_needs(self) -> Dict[str, Need]:
-        """Initialize internal needs"""
+        """Initialize internal needs with TIME-BASED decay."""
         return {
             'social': Need(
                 name='social',
                 value=0.3,
-                decay_rate=0.15,  # Increases 0.15/hour
+                decay_rate=0.15,  # 15% per hour
                 threshold_trigger=0.7
             ),
             'curiosity': Need(
                 name='curiosity',
                 value=0.2,
-                decay_rate=0.08,
+                decay_rate=0.08,  # 8% per hour
                 threshold_trigger=0.6
             ),
             'energy': Need(
                 name='energy',
-                value=1.0,  # Starts full (1.0 = full energy in typical game logic, but here 1.0 is CRITICAL need?)
-                # Wait, the Need class defines 1.0 as critical. 
-                # So for energy, 1.0 means "I NEED ENERGY" (Empty battery).
-                # 0.0 means "I AM SATISFIED" (Full battery).
-                # Decay should be positive to increase the 'need' for energy.
-                decay_rate=0.05, 
-                threshold_trigger=0.7  # When need > 0.7, battery is low
+                value=0.2,  # Low value = high energy (satisfied)
+                decay_rate=0.05,  # 5% per hour (fatigue)
+                threshold_trigger=0.7  # When > 0.7, energy is critical
             ),
             'affiliation': Need(
                 name='affiliation',
                 value=0.5,
-                decay_rate=0.1,
+                decay_rate=0.1,  # 10% per hour
                 threshold_trigger=0.8
             )
         }
     
     async def start(self):
-        """Start BDI cycle"""
+        """Start BDI cycle."""
         if not self.config.autonomy.enabled:
             logger.info("BDI engine disabled in config")
             return
         
         self._running = True
         asyncio.create_task(self._bdi_loop())
-        logger.info("BDI engine started")
+        logger.info("BDI engine started (metabolic decay active)")
     
     async def stop(self):
-        """Stop BDI cycle"""
+        """Stop BDI cycle."""
         self._running = False
         self._save_state()
         logger.info("BDI engine stopped")
     
     async def _bdi_loop(self):
-        """Main BDI cycle"""
+        """Main BDI cycle with TIME-BASED updates."""
         while self._running:
             try:
                 await asyncio.sleep(self.config.autonomy.check_interval_seconds)
                 
-                # Step 1: Update needs
+                # Step 1: Update needs (TIME-BASED)
                 await self._update_needs()
                 
                 # Step 2: Evaluate desires
@@ -183,22 +187,28 @@ class BDIEngine:
                 logger.error(f"BDI loop error: {e}", exc_info=True)
     
     async def _update_needs(self):
-        """Update need levels based on time decay"""
+        """Update need levels based on TIME passage (metabolic decay)."""
         now = datetime.now(timezone.utc)
-        hours_passed = (now - self._last_update).total_seconds() / 3600
-        
-        if hours_passed < 0.01:  # Skip if <36 seconds
-            return
         
         for need in self.needs.values():
-            need.decay(hours_passed)
+            # Calculate hours since last decay
+            time_since_decay = (now - need.last_decay).total_seconds() / 3600
+            
+            if time_since_decay < 0.01:  # Skip if < 36 seconds
+                continue
+            
+            # Apply time-based decay
+            need.decay(time_since_decay)
         
         self._last_update = now
         
         # Log critical needs
         critical = [n for n in self.needs.values() if n.is_critical()]
         if critical:
-            logger.debug(f"Critical needs: {[n.name for n in critical]}")
+            logger.info(
+                f"🔴 Critical needs: {', '.join(n.name for n in critical)} "
+                f"[{', '.join(f'{n.name}={n.value:.2f}' for n in critical)}]"
+            )
     
     def _evaluate_desires(self) -> List[str]:
         """
@@ -209,7 +219,7 @@ class BDIEngine:
         """
         desires = []
         
-        # Social desire
+        # Social desire (CONSEQUENTIAL)
         if self.needs['social'].is_critical():
             desires.append('seek_interaction')
         
@@ -217,7 +227,7 @@ class BDIEngine:
         if self.needs['curiosity'].is_critical():
             desires.append('seek_knowledge')
         
-        # Energy management
+        # Energy management (CONSEQUENTIAL)
         if self.needs['energy'].is_critical():
             desires.append('conserve_energy')
         
@@ -229,7 +239,7 @@ class BDIEngine:
     
     def _form_intention(self, desires: List[str]) -> Optional[Intention]:
         """
-        Generate intention from desires.
+        Generate intention from desires (WITH COOLDOWN).
         """
         
         # Check cooldown (min time between actions)
@@ -243,8 +253,8 @@ class BDIEngine:
         
         # Priority ranking
         priority_map = {
-            'conserve_energy': 0.9,  # High priority
-            'seek_interaction': 0.7,
+            'conserve_energy': 0.9,  # High priority (survival)
+            'seek_interaction': 0.7,  # Medium-high (social starvation)
             'strengthen_bond': 0.6,
             'seek_knowledge': 0.5
         }
@@ -280,7 +290,7 @@ class BDIEngine:
         )
     
     async def _execute_intentions(self):
-        """Execute queued intentions"""
+        """Execute queued intentions (WITH REAL CONSEQUENCES)."""
         if not self.intentions:
             return
         
@@ -303,20 +313,23 @@ class BDIEngine:
     
     async def _execute_action(self, intention: Intention) -> bool:
         """
-        Execute a specific intention.
+        Execute a specific intention (WITH METABOLIC CONSEQUENCES).
         """
         action = intention.action
         
-        logger.info(f"Executing intention: {action} (motivation: {intention.motivation})")
+        logger.info(
+            f"🎯 Executing intention: {action} "
+            f"(motivation: {intention.motivation}, priority: {intention.priority:.2f})"
+        )
         
         if action == 'rest':
             # Rest: Do nothing, recover energy
             self.needs['energy'].satisfy(0.3)
-            logger.info("Resting (low energy)")
+            logger.info("💤 Resting (energy recovery)")
             return True
         
         elif action == 'initiate_conversation':
-            # Initiate social interaction
+            # Initiate social interaction (SATISFIES SOCIAL NEED)
             trigger_reason = self._get_conversation_trigger(intention.motivation)
             
             await self.event_bus.publish(ProactiveImpulse(
@@ -324,8 +337,12 @@ class BDIEngine:
                 confidence=intention.priority
             ))
             
-            # Satisfy social need
+            # CONSEQUENCE: Satisfy social need
             self.needs['social'].satisfy(0.5)
+            # COST: Consume energy
+            self.needs['energy'].value = min(1.0, self.needs['energy'].value + 0.1)
+            
+            logger.info(f"📞 Initiated conversation (social: {self.needs['social'].value:.2f})")
             return True
         
         elif action == 'share_thought':
@@ -337,7 +354,11 @@ class BDIEngine:
                 confidence=intention.priority
             ))
             
+            # CONSEQUENCE: Satisfy affiliation
             self.needs['affiliation'].satisfy(0.4)
+            # COST: Consume energy
+            self.needs['energy'].value = min(1.0, self.needs['energy'].value + 0.08)
+            
             return True
         
         elif action == 'ask_question':
@@ -349,7 +370,11 @@ class BDIEngine:
                 confidence=intention.priority
             ))
             
+            # CONSEQUENCE: Satisfy curiosity
             self.needs['curiosity'].satisfy(0.3)
+            # COST: Consume energy
+            self.needs['energy'].value = min(1.0, self.needs['energy'].value + 0.05)
+            
             return True
         
         else:
@@ -357,7 +382,7 @@ class BDIEngine:
             return False
     
     def _get_conversation_trigger(self, motivation: str) -> str:
-        """Generate context-appropriate trigger reason"""
+        """Generate context-appropriate trigger reason."""
         triggers = {
             'seek_interaction': "haven't talked in a while, wanted to check in",
             'strengthen_bond': "thinking about you",
@@ -368,48 +393,82 @@ class BDIEngine:
         return triggers.get(motivation, "spontaneous impulse")
     
     async def update_need(self, need_name: str, delta: float):
-        """Manually update need (from external event)"""
+        """
+        Manually update need (from external event).
+        
+        Delta is SIGNED:
+        - Negative = Satisfy (reduce need)
+        - Positive = Increase need
+        """
         if need_name in self.needs:
-            # Note: Need value 0.0 is Satisfied, 1.0 is Critical.
-            # If we interact, we REDUCE the need (satisfy it).
-            # If delta is negative (e.g., -0.3 from orchestrator), it reduces the need.
-            # If delta is positive (e.g., +0.1), it increases the need (makes it more critical).
+            old_value = self.needs[need_name].value
             
-            # Orchestrator sends negative values to 'satisfy'.
-            self.needs[need_name].value = max(0.0, min(1.0, 
-                self.needs[need_name].value + delta
-            ))
-            logger.debug(f"Need updated: {need_name} {delta:+.2f}")
+            if delta < 0:
+                # Satisfy
+                self.needs[need_name].satisfy(-delta)
+            else:
+                # Increase
+                self.needs[need_name].value = min(1.0, self.needs[need_name].value + delta)
+            
+            new_value = self.needs[need_name].value
+            logger.debug(
+                f"Need updated: {need_name} "
+                f"{old_value:.2f} → {new_value:.2f} ({delta:+.2f})"
+            )
     
     def get_need_state(self) -> Dict[str, float]:
-        """Get current need values"""
+        """Get current need values."""
         return {name: need.value for name, need in self.needs.items()}
     
+    def check_willpower(self, task_cost: float = 0.2) -> tuple[bool, str]:
+        """
+        Check if agent has enough energy to perform a task.
+        
+        Returns:
+            (can_perform, reason)
+        """
+        energy_need = self.needs['energy'].value
+        
+        # If energy is critical and task is expensive, refuse
+        if energy_need > 0.8 and task_cost > 0.1:
+            return False, "I'm too tired right now, can we do this later?"
+        
+        # If energy is very low, warn but allow
+        if energy_need > 0.6:
+            return True, "I'm a bit tired, but I can help"
+        
+        return True, ""
+    
     def _save_state(self):
-        """Persist BDI state"""
+        """Persist BDI state."""
         try:
             state = {
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'needs': {
                     name: {
                         'value': need.value,
-                        'last_satisfied': need.last_satisfied.isoformat()
+                        'last_satisfied': need.last_satisfied.isoformat(),
+                        'last_decay': need.last_decay.isoformat()
                     }
                     for name, need in self.needs.items()
                 },
-                'last_action': self._last_action.isoformat()
+                'last_action': self._last_action.isoformat(),
+                'version': 2  # Sentience upgrade version
             }
             
             self._state_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self._state_file, 'w') as f:
                 json.dump(state, f, indent=2)
                 
+            logger.debug("BDI state saved")
+                
         except Exception as e:
             logger.error(f"Failed to save BDI state: {e}")
     
     def _load_state(self):
-        """Load BDI state from disk"""
+        """Load BDI state from disk."""
         if not self._state_file.exists():
+            logger.info("No saved BDI state found, using defaults")
             return
         
         try:
@@ -423,12 +482,15 @@ class BDIEngine:
                     self.needs[name].last_satisfied = datetime.fromisoformat(
                         data.get('last_satisfied')
                     )
+                    self.needs[name].last_decay = datetime.fromisoformat(
+                        data.get('last_decay')
+                    )
             
             self._last_action = datetime.fromisoformat(
                 state.get('last_action', datetime.now(timezone.utc).isoformat())
             )
             
-            logger.info("Loaded BDI state from disk")
+            logger.info("✓ Loaded BDI state from disk")
             
         except Exception as e:
-            logger.warning(f"Failed to load BDI state: {e}")
+            logger.warning(f"Failed to load BDI state: {e}, using defaults")

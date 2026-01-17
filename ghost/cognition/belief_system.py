@@ -1,9 +1,9 @@
 """
-Belief System: Knowledge Graph for Facts (Updated for Personality Evolution)
+Belief System: Knowledge Graph for Facts (Refactored for Async Init)
 
 Architecture:
     Stores beliefs as (entity, relation, value) triplets
-    NOW SUPPORTS: entity='agent' for self-memory and personality traits
+    Supports entity='agent' for self-memory and personality traits
     
 Examples:
     (user, name, "Sagun")
@@ -37,7 +37,7 @@ class BeliefSystem:
     Schema:
         (entity, relation, value, timestamp, confidence, source)
     
-    NEW: Supports entity='agent' for self-memory and personality
+    Supports entity='agent' for self-memory and personality
     
     Operations:
         - store(entity, relation, value)
@@ -52,13 +52,12 @@ class BeliefSystem:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
         self._init_database()
-        # NOTE: Cannot load beliefs here because store() is async.
-        # Must call initialize() after creation.
+        self._initialized = False
         
-        logger.info(f"Belief system initialized: {self.db_path}")
+        logger.info(f"Belief system created (DB: {self.db_path})")
     
     def _init_database(self):
-        """Create database schema"""
+        """Create database schema (synchronous)."""
         with self._get_connection() as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS beliefs (
@@ -83,11 +82,16 @@ class BeliefSystem:
                 ON beliefs(relation)
             """)
             
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_source 
+                ON beliefs(source)
+            """)
+            
             conn.commit()
     
     @contextmanager
     def _get_connection(self):
-        """Context manager for database connections"""
+        """Context manager for database connections."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         try:
@@ -96,38 +100,58 @@ class BeliefSystem:
             conn.close()
 
     async def initialize(self):
-        """Load core beliefs and perform startup checks."""
-        await self._load_core_beliefs()
-        logger.info("Belief system hydration complete")
+        """
+        Async initialization - MUST be called after construction.
+        
+        This ensures the belief system is fully hydrated before use.
+        Checks if genesis beliefs exist, warns if missing.
+        """
+        if self._initialized:
+            logger.warning("Belief system already initialized")
+            return
+        
+        logger.info("Initializing belief system...")
+        
+        # Check if genesis beliefs exist
+        genesis_count = await self._count_genesis_beliefs()
+        
+        if genesis_count == 0:
+            logger.warning(
+                "⚠️  NO GENESIS BELIEFS FOUND! "
+                "Agent has no identity. Run: python scripts/seed_personality.py"
+            )
+        else:
+            logger.info(f"✓ Loaded {genesis_count} genesis beliefs")
+        
+        # Load agent profile for logging
+        profile = await self.get_agent_profile()
+        identity_count = len(profile['identity'])
+        opinion_count = len(profile['opinions'])
+        trait_count = len(profile['traits'])
+        
+        logger.info(
+            f"Agent Ego State: "
+            f"{identity_count} identity, "
+            f"{opinion_count} opinions, "
+            f"{trait_count} traits"
+        )
+        
+        self._initialized = True
+        logger.info("Belief system initialization complete")
     
-    async def _load_core_beliefs(self):
-        """Initialize core identity beliefs (immutable)"""
-        core_beliefs = [
-            # Agent identity (immutable)
-            ('agent', 'is_ai', 'true', 1.0, 'core'),
-            ('agent', 'has_body', 'false', 1.0, 'core'),
-            ('agent', 'has_location', 'false', 1.0, 'core'),
-            ('agent', 'exists_physically', 'false', 1.0, 'core'),
-            ('agent', 'can_physical_action', 'false', 1.0, 'core'),
-            ('agent', 'name', 'Korone', 1.0, 'core'),
-            ('agent', 'type', 'autonomous_ai', 1.0, 'core'),
-            
-            # Capabilities (immutable)
-            ('agent', 'can_think', 'true', 1.0, 'core'),
-            ('agent', 'can_remember', 'true', 1.0, 'core'),
-            ('agent', 'can_reason', 'true', 1.0, 'core'),
-            ('agent', 'can_converse', 'true', 1.0, 'core'),
-            ('agent', 'can_form_opinions', 'true', 1.0, 'core'),  # NEW
-        ]
-        
-        count = 0
-        for entity, relation, value, confidence, source in core_beliefs:
-            # FIX: Properly await the store operation
-            success = await self.store(entity, relation, value, confidence, source)
-            if success:
-                count += 1
-        
-        logger.debug(f"Loaded {count} core beliefs")
+    async def _count_genesis_beliefs(self) -> int:
+        """Count beliefs with source='genesis'."""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as count FROM beliefs
+                    WHERE source = 'genesis'
+                """)
+                row = cursor.fetchone()
+                return row['count'] if row else 0
+        except Exception as e:
+            logger.error(f"Failed to count genesis beliefs: {e}")
+            return 0
     
     async def store(
         self,
@@ -145,27 +169,21 @@ class BeliefSystem:
             relation: Predicate (e.g., "name", "likes")
             value: Object (e.g., "Sagun", "cats")
             confidence: Certainty (0-1)
-            source: Where fact came from
+            source: Where fact came from ('genesis', 'inference', 'user_told')
             
         Returns:
             Success boolean
         """
         
-        # Validate core beliefs (immutable)
-        if source == 'core':
-            # Allow initial creation of core beliefs
-            pass
-        else:
-            # Check if trying to modify core belief
-            existing = await self.query(entity, relation)
-            if existing:
-                existing_source = await self._get_source(entity, relation)
-                if existing_source == 'core':
-                    logger.warning(
-                        f"Attempted to modify core belief: "
-                        f"({entity}, {relation}, {value})"
-                    )
-                    return False
+        # Validate genesis beliefs (immutable from external changes)
+        if source != 'genesis':
+            existing_source = await self._get_source(entity, relation)
+            if existing_source == 'genesis':
+                logger.warning(
+                    f"❌ Attempted to modify genesis belief: "
+                    f"({entity}, {relation}, {value})"
+                )
+                return False
         
         timestamp = datetime.now(timezone.utc).isoformat()
         
@@ -178,7 +196,7 @@ class BeliefSystem:
                 """, (entity, relation, value, timestamp, confidence, source))
                 conn.commit()
             
-            logger.debug(f"Stored: ({entity}, {relation}, {value})")
+            logger.debug(f"Stored: ({entity}, {relation}, {value}) [source={source}]")
             return True
             
         except Exception as e:
@@ -261,14 +279,14 @@ class BeliefSystem:
     
     async def get_agent_profile(self) -> Dict[str, Any]:
         """
-        NEW METHOD: Get agent's personality profile
+        Get agent's personality profile.
         
-        Returns all beliefs where entity='agent', excluding core immutables.
+        Returns all beliefs where entity='agent', categorized.
         This is the "Ego" - what the AI knows about itself.
         
         Returns:
             {
-                'identity': {...},  # Core facts
+                'identity': {...},  # Core facts (immutable)
                 'opinions': {...},  # Likes/dislikes
                 'traits': {...},    # Personality attributes
                 'memories': {...}   # Self-referenced memories
@@ -281,7 +299,8 @@ class BeliefSystem:
             core_relations = {
                 'is_ai', 'has_body', 'has_location', 'exists_physically',
                 'can_physical_action', 'name', 'type', 'can_think',
-                'can_remember', 'can_reason', 'can_converse', 'can_form_opinions'
+                'can_remember', 'can_reason', 'can_converse', 
+                'can_form_opinions', 'can_feel_emotions', 'created_by', 'purpose'
             }
             
             identity = {}
@@ -301,7 +320,7 @@ class BeliefSystem:
                 elif relation.startswith('memory_'):
                     memories[relation] = value
                 else:
-                    # Default to opinions
+                    # Default to opinions for uncategorized
                     opinions[relation] = value
             
             logger.debug(
@@ -382,7 +401,7 @@ class BeliefSystem:
         entity: str,
         relation: str
     ) -> Optional[str]:
-        """Get source of a belief"""
+        """Get source of a belief."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute("""
@@ -398,13 +417,19 @@ class BeliefSystem:
             return None
     
     async def get_summary(self) -> str:
-        """Get human-readable summary of beliefs"""
+        """Get human-readable summary of beliefs."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute("""
                     SELECT COUNT(*) as count FROM beliefs
                 """)
                 total = cursor.fetchone()['count']
+                
+                cursor = conn.execute("""
+                    SELECT COUNT(*) as count FROM beliefs
+                    WHERE source = 'genesis'
+                """)
+                genesis = cursor.fetchone()['count']
                 
                 # Get agent profile
                 agent_profile = await self.get_agent_profile()
@@ -424,6 +449,8 @@ class BeliefSystem:
                 return f"""
 Belief System Status:
 - Total beliefs: {total}
+- Genesis beliefs: {genesis}
+- Agent identity: {len(agent_profile['identity'])}
 - Agent opinions: {len(agent_profile['opinions'])}
 - Agent traits: {len(agent_profile['traits'])}
 - Recent:
@@ -433,7 +460,7 @@ Belief System Status:
             return f"Error getting summary: {e}"
     
     async def export_graph(self, output_path: str):
-        """Export beliefs as JSON for visualization"""
+        """Export beliefs as JSON for visualization."""
         try:
             with self._get_connection() as conn:
                 cursor = conn.execute("""

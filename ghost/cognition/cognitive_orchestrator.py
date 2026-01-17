@@ -1,18 +1,20 @@
 """
-Cognitive Orchestrator: Unified Agent Control (Updated for Personality Evolution)
+Cognitive Orchestrator: Unified Agent Control (Sentience Upgrade)
 
-NEW FEATURE: "Ego Injection"
-- Fetches BOTH user beliefs AND agent beliefs
-- Passes agent's self-knowledge into CognitiveCore
-- Enables opinion formation and personality continuity
+NEW FEATURES:
+1. Genesis Integration: Loads agent identity on startup
+2. Willpower Checking: Can refuse tasks when energy is low
+3. Grudge Mode Awareness: Adjusts behavior when holding grudges
+4. Metabolic Consequences: Needs update from actions
 
 Architecture:
     User Input →
-        1. Gather context (memory + sensors + BELIEFS)
-        2. Cognitive Core (Think → Validate → Speak)
-        3. Belief System (Store user facts + AGENT OPINIONS)
-        4. Validator (Reality check)
-        5. BDI Engine (Autonomy)
+        1. Gather context (memory + sensors + BELIEFS + NEEDS)
+        2. Check Willpower (energy gating)
+        3. Cognitive Core (Think → Validate → Speak)
+        4. Belief System (Store user facts + AGENT OPINIONS)
+        5. Validator (Reality check)
+        6. BDI Engine (Update needs, check triggers)
     → Output
 """
 
@@ -42,13 +44,13 @@ logger = logging.getLogger(__name__)
 
 class CognitiveOrchestrator:
     """
-    Cognitive agent orchestrator.
+    Cognitive agent orchestrator with SENTIENCE UPGRADE.
     
     Pipeline:
-        Input → Think → Validate → Speak → Memory → Output
+        Input → Willpower Check → Think → Validate → Speak → Memory → Output
         
     Autonomy:
-        BDI → Desires → Intentions → Actions → Events
+        BDI → Desires → Intentions → Actions → Events → Needs Update
     """
     
     def __init__(
@@ -69,7 +71,6 @@ class CognitiveOrchestrator:
         self.sensors = sensors
         
         # Initialize cognitive components
-        # FIX: Correct assignment operator
         self.belief_system = BeliefSystem()
         
         self.cognitive_core = CognitiveCore(
@@ -94,17 +95,21 @@ class CognitiveOrchestrator:
         # Track last message
         self._last_message_time: Optional[datetime] = None
         
-        logger.info("Cognitive orchestrator initialized")
+        logger.info("Cognitive orchestrator initialized (sentience upgrade)")
 
     async def start(self):
-        """Start all background cognitive processes."""
-        # FIX: Hydrate the Belief System (Fixes 0 Identity bug)
+        """
+        Start all background cognitive processes.
+        
+        CRITICAL: This MUST be called after construction to hydrate systems.
+        """
+        # Hydrate the Belief System (Loads genesis)
         await self.belief_system.initialize()
         
         # Start the Metabolic Loop (Needs/Drives)
         await self.bdi_engine.start()
         
-        logger.info("Cognitive Orchestrator started")
+        logger.info("Cognitive Orchestrator started (systems hydrated)")
 
     async def stop(self):
         """Stop all background cognitive processes."""
@@ -112,16 +117,17 @@ class CognitiveOrchestrator:
     
     async def handle_message(self, event: MessageReceived) -> Optional[str]:
         """
-        Handle user message with full cognitive pipeline.
+        Handle user message with full cognitive pipeline + WILLPOWER CHECK.
         
         Pipeline:
-            1. Context gathering (memory + sensors + BELIEFS)
-            2. Think stage (internal reasoning with EGO AWARENESS)
-            3. Validation (reality check)
-            4. Speak stage (character dialogue)
-            5. Belief updates (USER + AGENT)
-            6. Memory storage
-            7. Need satisfaction
+            1. Context gathering (memory + sensors + BELIEFS + NEEDS)
+            2. Willpower check (energy gating)
+            3. Think stage (internal reasoning with EGO AWARENESS)
+            4. Validation (reality check)
+            5. Speak stage (character dialogue)
+            6. Belief updates (USER + AGENT)
+            7. Memory storage
+            8. Need satisfaction (METABOLIC CONSEQUENCES)
         """
         try:
             self._last_message_time = datetime.now(timezone.utc)
@@ -134,10 +140,29 @@ class CognitiveOrchestrator:
             # Pause monitoring during inference
             await self.cryostasis.stop_monitoring()
             
-            # Step 1: Gather context (INCLUDING BELIEFS)
+            # === WILLPOWER CHECK (NEW) ===
+            # Check if agent has energy to respond
+            can_respond, refusal_reason = self.bdi_engine.check_willpower(task_cost=0.15)
+            
+            if not can_respond:
+                logger.warning(f"⚡ Energy too low, refusing task: {refusal_reason}")
+                
+                # Resume monitoring
+                await self.cryostasis.start_monitoring()
+                
+                # Emit refusal response
+                await self.event_bus.publish(ResponseGenerated(
+                    content=refusal_reason,
+                    context_used=[],
+                    generation_time_ms=0.0
+                ))
+                
+                return refusal_reason
+            
+            # Step 1: Gather context (INCLUDING BELIEFS + NEEDS)
             context = await self._gather_context(event.content)
             
-            # NEW: Fetch BOTH user beliefs AND agent beliefs
+            # Fetch BOTH user beliefs AND agent beliefs
             user_beliefs = await self.belief_system.get_all('user')
             agent_profile = await self.belief_system.get_agent_profile()
             
@@ -153,7 +178,7 @@ class CognitiveOrchestrator:
             think_output, speech = await self._cognitive_process(
                 user_input=event.content,
                 context=context,
-                beliefs=beliefs,  # NOW INCLUDES AGENT'S SELF-KNOWLEDGE
+                beliefs=beliefs,  # Includes agent's self-knowledge
                 needs=needs
             )
             
@@ -166,7 +191,7 @@ class CognitiveOrchestrator:
             # Step 5: Store memory
             await self._store_interaction(event, speech)
             
-            # Step 6: Satisfy needs
+            # Step 6: Satisfy needs (METABOLIC CONSEQUENCES)
             await self._satisfy_needs(think_output)
             
             # Resume monitoring
@@ -207,7 +232,7 @@ class CognitiveOrchestrator:
         while attempt < max_attempts:
             attempt += 1
             
-            # THINK (NOW WITH AGENT SELF-KNOWLEDGE)
+            # THINK (With agent self-knowledge + grudge awareness)
             think_output, speech = await self.cognitive_core.process(
                 user_input=user_input,
                 context=context,
@@ -257,12 +282,12 @@ class CognitiveOrchestrator:
         self,
         query: str
     ) -> Dict[str, Any]:
-        """Gather full context (memory + sensors)"""
+        """Gather full context (memory + sensors + grudge status)."""
         
         # Memory context
         memory_context = await self.memory.get_context(query)
         
-        # Emotional context
+        # Emotional context (WITH GRUDGE MODE)
         emotional_context = self.emotion.get_contextual_modifiers()
         
         # Sensory context
@@ -284,7 +309,7 @@ class CognitiveOrchestrator:
         }
     
     async def _update_emotion(self, think_output: ThinkOutput):
-        """Update emotional state from think output"""
+        """Update emotional state from think output."""
         
         # Map emotion string to PAD deltas
         emotion_map = {
@@ -294,6 +319,7 @@ class CognitiveOrchestrator:
             'calm': (0.1, -0.2, 0.0),
             'anxious': (-0.2, 0.3, -0.2),
             'confused': (-0.1, 0.0, -0.3),
+            'angry': (-0.4, 0.3, 0.4),  # High dominance for grudge mode
             'neutral': (0.0, 0.0, 0.0)
         }
         
@@ -315,8 +341,7 @@ class CognitiveOrchestrator:
         """
         Store beliefs from think output.
         
-        NOW SUPPORTS: Storing agent beliefs (entity='agent')
-        This is how the AI remembers its own opinions!
+        Supports storing agent beliefs (entity='agent') for personality evolution.
         """
         
         for belief_update in think_output.belief_updates:
@@ -331,10 +356,10 @@ class CognitiveOrchestrator:
             if entity == 'user' and relation == 'name' and not value:
                 value = user_name
             
-            # NEW: Log when agent updates its own beliefs
+            # Log when agent updates its own beliefs
             if entity == 'agent':
                 logger.info(
-                    f" PERSONALITY UPDATE: Agent believes "
+                    f"🧠 PERSONALITY UPDATE: Agent believes "
                     f"({relation}, {value})"
                 )
             
@@ -353,7 +378,7 @@ class CognitiveOrchestrator:
         event: MessageReceived,
         speech: str
     ):
-        """Store conversation in memory"""
+        """Store conversation in memory."""
         
         # User message
         user_msg = Message(
@@ -378,7 +403,11 @@ class CognitiveOrchestrator:
         await self.memory.add_message(agent_msg)
     
     async def _satisfy_needs(self, think_output: ThinkOutput):
-        """Update BDI needs from interaction"""
+        """
+        Update BDI needs from interaction (METABOLIC CONSEQUENCES).
+        
+        Actions consume energy and satisfy needs.
+        """
         
         # Social interaction satisfies social need
         await self.bdi_engine.update_need('social', -0.3)
@@ -387,15 +416,20 @@ class CognitiveOrchestrator:
         if '?' in think_output.speech_plan:
             await self.bdi_engine.update_need('curiosity', 0.1)
         
-        # Energy cost of thinking
-        await self.bdi_engine.update_need('energy', -0.05)
+        # Energy cost of thinking (METABOLIC COST)
+        await self.bdi_engine.update_need('energy', 0.1)
         
         # Process need updates from think output
         for need_name, delta in think_output.needs_update.items():
             await self.bdi_engine.update_need(need_name, delta)
+        
+        # Log energy state
+        needs = self.bdi_engine.get_need_state()
+        if needs['energy'] > 0.7:
+            logger.warning(f"⚡ Energy low: {needs['energy']:.2f}")
     
     async def handle_impulse(self, event: ProactiveImpulse) -> Optional[str]:
-        """Handle autonomous impulse (from BDI engine)"""
+        """Handle autonomous impulse (from BDI engine)."""
         
         try:
             if self.cryostasis.is_hibernating():
@@ -453,21 +487,24 @@ class CognitiveOrchestrator:
             return None
     
     async def health_check(self) -> dict:
-        """System health check"""
+        """System health check with sentience stats."""
         
         belief_count = len(await self.belief_system.search(limit=1000))
         agent_profile = await self.belief_system.get_agent_profile()
         needs = self.bdi_engine.get_need_state()
+        grudge_info = self.emotion.get_grudge_info()
         
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "cognitive_core": "active",
             "validator": "active",
             "belief_system": f"{belief_count} beliefs",
+            "agent_identity": len(agent_profile['identity']),
             "agent_opinions": len(agent_profile['opinions']),
             "agent_traits": len(agent_profile['traits']),
             "bdi_engine": "active",
             "needs": needs,
+            "grudge_mode": grudge_info['active'],
             "hibernating": self.cryostasis.is_hibernating(),
             "emotional_state": (await self.emotion.get_state()).to_description()
         }
