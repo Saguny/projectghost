@@ -69,6 +69,7 @@ class CognitiveOrchestrator:
         self.sensors = sensors
         
         # Initialize cognitive components
+        # FIX: Correct assignment operator
         self.belief_system = BeliefSystem()
         
         self.cognitive_core = CognitiveCore(
@@ -94,6 +95,20 @@ class CognitiveOrchestrator:
         self._last_message_time: Optional[datetime] = None
         
         logger.info("Cognitive orchestrator initialized")
+
+    async def start(self):
+        """Start all background cognitive processes."""
+        # FIX: Hydrate the Belief System (Fixes 0 Identity bug)
+        await self.belief_system.initialize()
+        
+        # Start the Metabolic Loop (Needs/Drives)
+        await self.bdi_engine.start()
+        
+        logger.info("Cognitive Orchestrator started")
+
+    async def stop(self):
+        """Stop all background cognitive processes."""
+        await self.bdi_engine.stop()
     
     async def handle_message(self, event: MessageReceived) -> Optional[str]:
         """
@@ -319,7 +334,7 @@ class CognitiveOrchestrator:
             # NEW: Log when agent updates its own beliefs
             if entity == 'agent':
                 logger.info(
-                    f"🧠 PERSONALITY UPDATE: Agent believes "
+                    f" PERSONALITY UPDATE: Agent believes "
                     f"({relation}, {value})"
                 )
             

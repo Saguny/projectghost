@@ -124,9 +124,13 @@ class BDIEngine:
             ),
             'energy': Need(
                 name='energy',
-                value=1.0,  # Starts full
-                decay_rate=-0.05,  # Negative = depletes
-                threshold_trigger=0.3  # Low energy = rest
+                value=1.0,  # Starts full (1.0 = full energy in typical game logic, but here 1.0 is CRITICAL need?)
+                # Wait, the Need class defines 1.0 as critical. 
+                # So for energy, 1.0 means "I NEED ENERGY" (Empty battery).
+                # 0.0 means "I AM SATISFIED" (Full battery).
+                # Decay should be positive to increase the 'need' for energy.
+                decay_rate=0.05, 
+                threshold_trigger=0.7  # When need > 0.7, battery is low
             ),
             'affiliation': Need(
                 name='affiliation',
@@ -194,7 +198,7 @@ class BDIEngine:
         # Log critical needs
         critical = [n for n in self.needs.values() if n.is_critical()]
         if critical:
-            logger.info(f"Critical needs: {[n.name for n in critical]}")
+            logger.debug(f"Critical needs: {[n.name for n in critical]}")
     
     def _evaluate_desires(self) -> List[str]:
         """
@@ -214,7 +218,7 @@ class BDIEngine:
             desires.append('seek_knowledge')
         
         # Energy management
-        if self.needs['energy'].value < self.needs['energy'].threshold_trigger:
+        if self.needs['energy'].is_critical():
             desires.append('conserve_energy')
         
         # Affiliation desire
@@ -226,12 +230,6 @@ class BDIEngine:
     def _form_intention(self, desires: List[str]) -> Optional[Intention]:
         """
         Generate intention from desires.
-        
-        Args:
-            desires: Active desire list
-            
-        Returns:
-            Intention or None
         """
         
         # Check cooldown (min time between actions)
@@ -306,9 +304,6 @@ class BDIEngine:
     async def _execute_action(self, intention: Intention) -> bool:
         """
         Execute a specific intention.
-        
-        Returns:
-            Success boolean
         """
         action = intention.action
         
@@ -375,6 +370,12 @@ class BDIEngine:
     async def update_need(self, need_name: str, delta: float):
         """Manually update need (from external event)"""
         if need_name in self.needs:
+            # Note: Need value 0.0 is Satisfied, 1.0 is Critical.
+            # If we interact, we REDUCE the need (satisfy it).
+            # If delta is negative (e.g., -0.3 from orchestrator), it reduces the need.
+            # If delta is positive (e.g., +0.1), it increases the need (makes it more critical).
+            
+            # Orchestrator sends negative values to 'satisfy'.
             self.needs[need_name].value = max(0.0, min(1.0, 
                 self.needs[need_name].value + delta
             ))

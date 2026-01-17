@@ -46,13 +46,14 @@ class BeliefSystem:
         - get_all(entity) → {relation: value}
         - get_agent_profile() → agent's personality and opinions
     """
-    
+
     def __init__(self, db_path: str = "data/beliefs.db"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
         self._init_database()
-        self._load_core_beliefs()
+        # NOTE: Cannot load beliefs here because store() is async.
+        # Must call initialize() after creation.
         
         logger.info(f"Belief system initialized: {self.db_path}")
     
@@ -93,8 +94,13 @@ class BeliefSystem:
             yield conn
         finally:
             conn.close()
+
+    async def initialize(self):
+        """Load core beliefs and perform startup checks."""
+        await self._load_core_beliefs()
+        logger.info("Belief system hydration complete")
     
-    def _load_core_beliefs(self):
+    async def _load_core_beliefs(self):
         """Initialize core identity beliefs (immutable)"""
         core_beliefs = [
             # Agent identity (immutable)
@@ -114,8 +120,14 @@ class BeliefSystem:
             ('agent', 'can_form_opinions', 'true', 1.0, 'core'),  # NEW
         ]
         
+        count = 0
         for entity, relation, value, confidence, source in core_beliefs:
-            self.store(entity, relation, value, confidence, source)
+            # FIX: Properly await the store operation
+            success = await self.store(entity, relation, value, confidence, source)
+            if success:
+                count += 1
+        
+        logger.debug(f"Loaded {count} core beliefs")
     
     async def store(
         self,
