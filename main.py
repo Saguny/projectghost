@@ -1,19 +1,25 @@
-"""Main entry point for Project Ghost."""
+"""
+Main entry point: Cognitive Agent Architecture
+
+Architecture:
+    - Cognitive Core (Think/Speak)
+    - Validator (Reality firewall)
+    - Belief System (Knowledge graph)
+    - BDI Engine (Autonomy)
+    - Cognitive Orchestrator (Integration)
+"""
 
 import asyncio
 import logging
 import sys
 from pathlib import Path
 
-# Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from ghost.core.config import load_config, validate_config
 from ghost.core.events import EventBus
-from ghost.core.orchestrator import Orchestrator
 from ghost.memory.memory_service import MemoryService
 from ghost.emotion.emotion_service import EmotionService
-from ghost.inference.inference_service import InferenceService
 from ghost.inference.ollama_client import OllamaClient
 from ghost.cryostasis.controller import CryostasisController
 from ghost.integrations.discord_adapter import DiscordAdapter
@@ -21,17 +27,38 @@ from ghost.sensors.hardware_sensor import HardwareSensor
 from ghost.sensors.time_sensor import TimeSensor
 from ghost.utils.logging_config import setup_logging
 from ghost.utils.validation import validate_discord_token, ValidationError
-from ghost.autonomy.autonomy_engine import AutonomyEngine
+
+# Cognitive components
+from ghost.cognition.cognitive_orchestrator import CognitiveOrchestrator
 
 logger = logging.getLogger(__name__)
 
 
+def print_cognitive_banner():
+    """Print startup banner"""
+    banner = """
+╔═══════════════════════════════════════════════════════════╗
+║              PROJECT GHOST: COGNITIVE AGENT               ║
+║                                                           ║
+║  Architecture:                                            ║
+║    • Bicameral Mind (Think/Speak)                        ║
+║    • Reality Validator (Hallucination prevention)        ║
+║    • Knowledge Graph (Fact verification)                 ║
+║    • BDI Autonomy (Goal-driven behavior)                 ║
+║                                                           ║
+║  "A synthetic mind that thinks before it speaks"         ║
+╚═══════════════════════════════════════════════════════════╝
+"""
+    print(banner)
+
+
 async def main():
-    """Main application entry point."""
+    """Main entry point: Cognitive agent bootstrap"""
+    
+    print_cognitive_banner()
+    
     # Load configuration
     config = load_config()
-    
-    # Setup logging
     setup_logging(config.debug_mode, config.log_level)
     
     # Validate configuration
@@ -42,7 +69,7 @@ async def main():
             logger.error(f"  - {error}")
         sys.exit(1)
     
-    # Validate Discord token format
+    # Validate Discord token
     try:
         if not validate_discord_token(config.discord.token):
             logger.error("Invalid Discord token format")
@@ -52,26 +79,31 @@ async def main():
         sys.exit(1)
     
     logger.info("=" * 60)
-    logger.info("Project Ghost Initializing")
+    logger.info("Cognitive Architecture Initialization")
     logger.info("=" * 60)
     
-    # Service references for cleanup
     event_bus = None
-    autonomy_engine = None
     cryostasis = None
     discord_adapter = None
+    cognitive_orchestrator = None
     
     try:
         # Initialize event bus
         event_bus = EventBus(max_queue_size=1000)
         await event_bus.start()
+        logger.info("✓ Event bus started")
         
-        # Initialize core services
+        # Initialize memory
         memory = MemoryService(config.memory)
-        emotion = EmotionService(config.persona, event_bus)
+        logger.info("✓ Memory service initialized")
         
+        # Initialize emotion
+        emotion = EmotionService(config.persona, event_bus)
+        logger.info("✓ Emotion service initialized")
+        
+        # Initialize Ollama client
         ollama_client = OllamaClient(config.ollama)
-        inference = InferenceService(config.ollama, config.persona)
+        logger.info("✓ Ollama client initialized")
         
         # Initialize cryostasis
         cryostasis = CryostasisController(
@@ -79,55 +111,68 @@ async def main():
             ollama_client,
             event_bus
         )
+        logger.info("✓ Cryostasis controller initialized")
         
         # Initialize sensors
         sensors = [
             HardwareSensor(config.cryostasis),
             TimeSensor()
         ]
+        logger.info("✓ Sensors initialized")
         
-        # Initialize orchestrator
-        orchestrator = Orchestrator(
+        # === COGNITIVE ARCHITECTURE ===
+        
+        # Initialize cognitive orchestrator (includes all cognitive components)
+        cognitive_orchestrator = CognitiveOrchestrator(
             config=config,
             event_bus=event_bus,
             memory=memory,
             emotion=emotion,
-            inference=inference,
+            ollama_client=ollama_client,
             cryostasis=cryostasis,
             sensors=sensors
         )
+        logger.info("✓ Cognitive orchestrator initialized")
         
-        # Initialize autonomy engine (must be after orchestrator)
-        autonomy_engine = AutonomyEngine(
-            config.autonomy,
-            event_bus,
-            emotion
-        )
-        await autonomy_engine.start()
+        # Start BDI engine
+        await cognitive_orchestrator.bdi_engine.start()
+        logger.info("✓ BDI engine started")
         
-        # Initialize Discord
+        # Initialize Discord adapter
         discord_adapter = DiscordAdapter(
             config.discord,
             event_bus,
-            orchestrator
+            cognitive_orchestrator  # Uses cognitive orchestrator
         )
+        logger.info("✓ Discord adapter initialized")
         
         # Health check
+        logger.info("=" * 60)
         logger.info("Performing health check...")
-        health = await orchestrator.health_check()
-        logger.info(f"Health check: {health}")
+        health = await cognitive_orchestrator.health_check()
+        logger.info(f"Health: {health}")
         
-        if not health.get('inference_available', False):
-            logger.warning("Ollama not available! Bot will have limited functionality.")
-            logger.warning("Make sure Ollama is running: ollama serve")
+        # Check Ollama availability
+        ollama_available = await ollama_client.health_check()
+        if not ollama_available:
+            logger.warning("⚠ Ollama not available - limited functionality")
+            logger.warning("  Start Ollama: ollama serve")
+        else:
+            logger.info("✓ Ollama available")
+        
+        # Display belief system summary
+        belief_summary = await cognitive_orchestrator.belief_system.get_summary()
+        logger.info(f"\n{belief_summary}")
         
         # Start cryostasis monitoring
         await cryostasis.start_monitoring()
+        logger.info("✓ Cryostasis monitoring started")
         
         # Start Discord bot
         logger.info("=" * 60)
-        logger.info("System Ready - Starting Discord Bot")
+        logger.info("COGNITIVE AGENT READY")
         logger.info("=" * 60)
+        logger.info("Starting Discord bot...")
         
         await discord_adapter.start(config.discord.token)
         
@@ -137,11 +182,11 @@ async def main():
         logger.error(f"Fatal error: {e}", exc_info=True)
         sys.exit(1)
     finally:
-        logger.info("Shutting down...")
+        logger.info("Shutting down cognitive agent...")
         
-        # Graceful shutdown in reverse order
-        if autonomy_engine:
-            await autonomy_engine.stop()
+        # Graceful shutdown
+        if cognitive_orchestrator and hasattr(cognitive_orchestrator, 'bdi_engine'):
+            await cognitive_orchestrator.bdi_engine.stop()
         
         if discord_adapter and discord_adapter.is_ready():
             await discord_adapter.close()
@@ -159,4 +204,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nShutdown complete.")
+        print("\nCognitive agent terminated.")

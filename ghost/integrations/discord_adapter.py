@@ -10,7 +10,7 @@ from ghost.core.events import (
     EventBus, MessageReceived, ResponseGenerated, AutonomousMessageSent
 )
 from ghost.core.config import DiscordConfig
-from ghost.core.orchestrator import Orchestrator
+from ghost.cognition import CognitiveOrchestrator as Orchestrator
 from ghost.core.speech_governor import SpeechGovernor
 
 logger = logging.getLogger(__name__)

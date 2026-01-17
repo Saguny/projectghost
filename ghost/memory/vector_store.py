@@ -59,8 +59,68 @@ class VectorStore:
             f"(importance_threshold={importance_threshold})"
         )
 
+    """Vector database for semantic memory storage."""
+
+import logging
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List
+
+try:
+    import chromadb
+    from chromadb.config import Settings
+    from sentence_transformers import SentenceTransformer
+    VECTOR_DB_AVAILABLE = True
+except ImportError:
+    VECTOR_DB_AVAILABLE = False
+
+from ghost.core.interfaces import Message
+from ghost.memory.importance_scorer import ImportanceScorer
+
+logger = logging.getLogger(__name__)
+
+
+class VectorStore:
+    """Manages semantic memory using ChromaDB."""
+
+    def __init__(
+        self,
+        persist_directory: str,
+        embedding_model: str,
+        importance_threshold: float = 0.4
+    ):
+        self.persist_directory = Path(persist_directory)
+        self.persist_directory.mkdir(parents=True, exist_ok=True)
+        self.importance_threshold = importance_threshold
+
+        if not VECTOR_DB_AVAILABLE:
+            logger.warning("ChromaDB not available, using fallback memory")
+            self._fallback_mode = True
+            self._fallback_store: List[Message] = []
+            return
+
+        self._fallback_mode = False
+
+        # Initialize ChromaDB
+        self.client = chromadb.PersistentClient(
+            path=str(self.persist_directory),
+            settings=Settings(anonymized_telemetry=False)
+        )
+
+        self.collection = self.client.get_or_create_collection(
+            name="ghost_memories",
+            metadata={"hnsw:space": "cosine"}
+        )
+
+        # Initialize embedding model
+        self.embedder = SentenceTransformer(embedding_model)
+        logger.info(
+            f"Vector store initialized with {embedding_model} "
+            f"(importance_threshold={importance_threshold})"
+        )
+
     async def add_message(self, message: Message) -> None:
-        """Add message with importance scoring."""
         if self._fallback_mode:
             self._fallback_store.append(message)
             if len(self._fallback_store) > 1000:
@@ -68,32 +128,30 @@ class VectorStore:
             return
 
         try:
-            # Score importance
             scorer = ImportanceScorer()
             importance = scorer.score_message(message)
 
-            # Only store if important enough
-            if importance < self.importance_threshold:
+            dynamic_threshold = self._calculate_dynamic_threshold()
+
+            if importance < dynamic_threshold:
                 logger.debug(
                     f"Skipping low-importance message "
-                    f"(score: {importance:.2f} < threshold: {self.importance_threshold})"
+                    f"(score: {importance:.2f} < dynamic threshold: {dynamic_threshold:.2f})"
                 )
                 return
 
-            # Add importance to metadata
             message.metadata["importance"] = importance
 
-            # Generate embedding
             embedding = self.embedder.encode(message.content).tolist()
 
-            # Prepare metadata (convert datetime to string)
             metadata = {
                 "role": message.role,
-                **{k: str(v) if isinstance(v, datetime) else v 
-                   for k, v in message.metadata.items()}
+                **{
+                    k: str(v) if isinstance(v, datetime) else v
+                    for k, v in message.metadata.items()
+                }
             }
 
-            # Store in ChromaDB
             self.collection.add(
                 embeddings=[embedding],
                 documents=[message.content],
@@ -105,6 +163,23 @@ class VectorStore:
 
         except Exception as e:
             logger.error(f"Failed to add to vector store: {e}", exc_info=True)
+
+    def _calculate_dynamic_threshold(self) -> float:
+        try:
+            count = self.collection.count()
+
+            if count < 100:
+                return 0.2
+            elif count < 500:
+                return 0.3
+            elif count < 1000:
+                return self.importance_threshold
+            else:
+                return min(0.6, self.importance_threshold + 0.1)
+
+        except Exception:
+            return self.importance_threshold
+
 
     async def search(
         self,

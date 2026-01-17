@@ -4,14 +4,15 @@ This module contains the foundational components that tie the entire system toge
 - Configuration loading and validation
 - Event bus for inter-service communication
 - Core interfaces and data models
-- Main orchestrator that coordinates all services
+- Cognitive orchestrator that coordinates all services
 
 Usage:
-    from ghost.core import SystemConfig, EventBus, Orchestrator
+    from ghost.core import SystemConfig, EventBus
+    from ghost.cognition import CognitiveOrchestrator
     
     config = load_config()
     event_bus = EventBus()
-    orchestrator = Orchestrator(config, event_bus, ...)
+    # CognitiveOrchestrator is now in ghost.cognition module
 """
 
 from ghost.core.config import (
@@ -49,7 +50,6 @@ from ghost.core.interfaces import (
     ICryostasisController,
     IHealthCheck,
 )
-from ghost.core.orchestrator import Orchestrator
 
 __version__ = "1.0.0"
 
@@ -91,9 +91,6 @@ __all__ = [
     "ISensor",
     "ICryostasisController",
     "IHealthCheck",
-    
-    # Main Orchestrator
-    "Orchestrator",
 ]
 
 
