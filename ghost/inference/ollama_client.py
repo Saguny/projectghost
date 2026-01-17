@@ -1,5 +1,3 @@
-"""Ollama API client with retry logic."""
-
 from typing import List, Dict, Any
 import logging
 import aiohttp
@@ -18,13 +16,10 @@ logger = logging.getLogger(__name__)
 
 
 class OllamaConnectionError(Exception):
-    """Ollama connection error."""
     pass
 
 
 class OllamaClient:
-    """Client for Ollama LLM API with robust error handling."""
-    
     def __init__(self, config: OllamaConfig):
         self.config = config
         self.base_url = config.url
@@ -32,9 +27,10 @@ class OllamaClient:
         self.timeout = aiohttp.ClientTimeout(total=config.timeout_seconds)
     
     @retry(
-        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError)),
+        retry=retry_if_exception_type((aiohttp.ClientError, asyncio.TimeoutError, OllamaConnectionError)),
         stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10)
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True
     )
     async def generate(
         self,
@@ -43,13 +39,11 @@ class OllamaClient:
         max_tokens: int = 200,
         stop_tokens: List[str] = None
     ) -> str:
-        """Generate completion from Ollama."""
         url = f"{self.base_url}/api/chat"
 
         if stop_tokens is None:
             stop_tokens = ["User:", "Assistant:"]
         
-        # Convert to Ollama format
         ollama_messages = [
             {"role": msg.role, "content": msg.content}
             for msg in messages
@@ -64,7 +58,6 @@ class OllamaClient:
                 "num_predict": max_tokens,
                 "top_k": 50,
                 "repeat_penalty": 1.2,
-                
                 "stop": stop_tokens
             }
         }
@@ -81,7 +74,8 @@ class OllamaClient:
                     data = await resp.json()
                     content = data.get('message', {}).get('content', '')
                     
-                    if not content:
+                    if not content or not content.strip():
+                        logger.warning("Empty response from Ollama, will retry")
                         raise OllamaConnectionError("Empty response from Ollama")
                     
                     return content.strip()
@@ -94,7 +88,6 @@ class OllamaClient:
             raise OllamaConnectionError("Ollama request timed out")
     
     async def health_check(self) -> bool:
-        """Check if Ollama is available."""
         url = f"{self.base_url}/api/tags"
         
         try:
@@ -106,7 +99,6 @@ class OllamaClient:
             return False
     
     async def unload_model(self) -> bool:
-        """Unload model from VRAM."""
         url = f"{self.base_url}/api/generate"
         payload = {"model": self.model, "keep_alive": 0}
         

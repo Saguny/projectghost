@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 
 
 class SystemEventLogger:
-    
     def __init__(self, log_dir: str = "data/logs"):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -25,9 +24,9 @@ class SystemEventLogger:
     async def on_emotional_state_changed(self, event: EmotionalStateChanged):
         logger.info(
             f"Emotional transition: "
-            f"P:{event.old_pleasure:.2f}→{event.new_pleasure:.2f}, "
-            f"A:{event.old_arousal:.2f}→{event.new_arousal:.2f}, "
-            f"D:{event.old_dominance:.2f}→{event.new_dominance:.2f} "
+            f"P:{event.old_pleasure:.2f}->{event.new_pleasure:.2f}, "
+            f"A:{event.old_arousal:.2f}->{event.new_arousal:.2f}, "
+            f"D:{event.old_dominance:.2f}->{event.new_dominance:.2f} "
             f"({event.trigger})"
         )
         
@@ -84,7 +83,7 @@ class SystemEventLogger:
     
     async def _write_metric(self, data: dict):
         try:
-            with open(self.metrics_file, 'a') as f:
+            with open(self.metrics_file, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(data) + '\n')
         except Exception as e:
             logger.error(f"Failed to write metric: {e}")

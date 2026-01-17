@@ -1,12 +1,6 @@
-"""
-Cognitive Core: Bicameral Mind Implementation
-
-Architecture:
-    User Input → Think Stage → Validator → Speak Stage → Output
-"""
-
 import logging
 import json
+import re
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -19,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ThinkOutput:
-    """Structured output from think stage (internal reasoning)"""
     intent: str
     emotion: str
     belief_updates: List[Dict[str, str]]
@@ -28,8 +21,6 @@ class ThinkOutput:
     action_request: Optional[str]
     speech_plan: str
     confidence: float
-
-    # Metadata
     reasoning_trace: str
     timestamp: str = None
 
@@ -43,20 +34,22 @@ class ThinkOutput:
     @classmethod
     def from_json(cls, json_str: str) -> "ThinkOutput":
         try:
-            cleaned = json_str.strip()
-
-            if "```json" in cleaned:
-                cleaned = cleaned.split("```json")[1].split("```")[0].strip()
-            elif "```" in cleaned:
-                cleaned = cleaned.split("```")[1].split("```")[0].strip()
-
-            lines = cleaned.split("\n")
-            json_lines = []
+            json_match = re.search(r'\{[\s\S]*\}', json_str)
+            
+            if not json_match:
+                logger.warning("No JSON structure found in response, using sanity fallback")
+                return cls._sanity_fallback(json_str)
+            
+            extracted = json_match.group(0)
+            
+            lines = extracted.split("\n")
+            cleaned_lines = []
             for line in lines:
-                if line.strip() and not line.strip().startswith("//"):
-                    json_lines.append(line)
-
-            cleaned = "\n".join(json_lines)
+                stripped = line.strip()
+                if stripped and not stripped.startswith("//"):
+                    cleaned_lines.append(line)
+            
+            cleaned = "\n".join(cleaned_lines)
             data = json.loads(cleaned)
 
             return cls(
@@ -72,34 +65,40 @@ class ThinkOutput:
             )
 
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.error(f"Failed to parse think output: {e}")
-            logger.debug(f"Raw output: {json_str[:200]}...")
+            logger.error(f"JSON parsing failed: {e}")
+            return cls._sanity_fallback(json_str)
 
-            return cls(
-                intent="parse_error",
-                emotion="confused",
-                belief_updates=[],
-                memory_queries=[],
-                needs_update={},
-                action_request=None,
-                speech_plan="i had trouble processing that",
-                confidence=0.0,
-                reasoning_trace=f"Parse error: {e}"
-            )
+    @classmethod
+    def _sanity_fallback(cls, raw_text: str) -> "ThinkOutput":
+        sanitized = re.sub(r'https?://\S+', '', raw_text).strip()
+        
+        emotion = "confused"
+        if any(word in sanitized.lower() for word in ["okay", "fine", "good"]):
+            emotion = "calm"
+        elif any(word in sanitized.lower() for word in ["sorry", "trouble", "issue"]):
+            emotion = "apologetic"
+        
+        speech_plan = sanitized[:100] if sanitized else "acknowledge the message"
+        
+        return cls(
+            intent="text_response",
+            emotion=emotion,
+            belief_updates=[],
+            memory_queries=[],
+            needs_update={},
+            action_request=None,
+            speech_plan=speech_plan,
+            confidence=0.3,
+            reasoning_trace=f"Fallback mode: raw text detected. Length={len(raw_text)}"
+        )
 
 
 class CognitiveCore:
-    """
-    Bicameral Mind: Separates reasoning from speech.
-    """
-
     def __init__(self, ollama_client: OllamaClient, persona_config):
         self.ollama_client = ollama_client
         self.persona_config = persona_config
-
         self.think_system_prompt = self._build_think_prompt()
         self.speak_system_prompt = self._build_speak_prompt()
-
         logger.info("Cognitive core initialized (bicameral architecture)")
 
     async def process(
@@ -156,10 +155,9 @@ class CognitiveCore:
                 messages=think_messages,
                 temperature=0.4,
                 max_tokens=600,
-                stop_tokens=[]  # FIXED: Don't use stop tokens for JSON generation
+                stop_tokens=[]
             )
             
-            # FIXED: Check for empty response
             if not think_json or not think_json.strip():
                 logger.error("Ollama returned empty response for think stage")
                 raise ValueError("Empty response from Ollama")
@@ -272,7 +270,6 @@ Stay in character. Use your personality.
 """
 
     def _build_think_prompt(self) -> str:
-        # FIXED: Simplified and clearer prompt for JSON generation
         return """You are the INTERNAL REASONING SYSTEM for an AI agent.
 
 Your job is to THINK, not speak. Analyze the user's input and output ONLY valid JSON.

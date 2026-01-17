@@ -4,15 +4,12 @@ This module contains the foundational components that tie the entire system toge
 - Configuration loading and validation
 - Event bus for inter-service communication
 - Core interfaces and data models
-- Cognitive orchestrator that coordinates all services
+- Speech pacing and segmentation
+- Event logging and monitoring system
 
 Usage:
-    from ghost.core import SystemConfig, EventBus
+    from ghost.core import SystemConfig, EventBus, SpeechGovernor
     from ghost.cognition import CognitiveOrchestrator
-    
-    config = load_config()
-    event_bus = EventBus()
-    # CognitiveOrchestrator is now in ghost.cognition module
 """
 
 from ghost.core.config import (
@@ -49,6 +46,11 @@ from ghost.core.interfaces import (
     ISensor,
     ICryostasisController,
     IHealthCheck,
+)
+from ghost.core.speech_governor import SpeechGovernor
+from ghost.core.events_listener import (
+    SystemEventLogger,
+    register_event_listeners
 )
 
 __version__ = "1.0.0"
@@ -91,6 +93,13 @@ __all__ = [
     "ISensor",
     "ICryostasisController",
     "IHealthCheck",
+
+    # Speech
+    "SpeechGovernor",
+
+    # Logging & Listeners
+    "SystemEventLogger",
+    "register_event_listeners",
 ]
 
 
@@ -100,9 +109,5 @@ def get_version() -> str:
 
 
 def create_default_config() -> SystemConfig:
-    """Create a default system configuration.
-    
-    Returns:
-        SystemConfig with default values
-    """
+    """Create a default system configuration."""
     return SystemConfig()

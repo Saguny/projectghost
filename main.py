@@ -1,14 +1,3 @@
-"""
-Main entry point: Cognitive Agent Architecture
-
-Architecture:
-    - Cognitive Core (Think/Speak)
-    - Validator (Reality firewall)
-    - Belief System (Knowledge graph)
-    - BDI Engine (Autonomy)
-    - Cognitive Orchestrator (Integration)
-"""
-
 import asyncio
 import logging
 import sys
@@ -27,15 +16,14 @@ from ghost.sensors.hardware_sensor import HardwareSensor
 from ghost.sensors.time_sensor import TimeSensor
 from ghost.utils.logging_config import setup_logging
 from ghost.utils.validation import validate_discord_token, ValidationError
+from ghost.core.events_listener import register_event_listeners
 
-# Cognitive components
 from ghost.cognition.cognitive_orchestrator import CognitiveOrchestrator
 
 logger = logging.getLogger(__name__)
 
 
 def print_cognitive_banner():
-    """Print startup banner"""
     banner = """
 ╔═══════════════════════════════════════════════════════════╗
 ║              PROJECT GHOST: COGNITIVE AGENT               ║
@@ -53,15 +41,11 @@ def print_cognitive_banner():
 
 
 async def main():
-    """Main entry point: Cognitive agent bootstrap"""
-    
     print_cognitive_banner()
     
-    # Load configuration
     config = load_config()
     setup_logging(config.debug_mode, config.log_level)
     
-    # Validate configuration
     errors = validate_config(config)
     if errors:
         logger.error("Configuration errors:")
@@ -69,7 +53,6 @@ async def main():
             logger.error(f"  - {error}")
         sys.exit(1)
     
-    # Validate Discord token
     try:
         if not validate_discord_token(config.discord.token):
             logger.error("Invalid Discord token format")
@@ -88,24 +71,22 @@ async def main():
     cognitive_orchestrator = None
     
     try:
-        # Initialize event bus
         event_bus = EventBus(max_queue_size=1000)
         await event_bus.start()
         logger.info("✓ Event bus started")
         
-        # Initialize memory
+        register_event_listeners(event_bus)
+        logger.info("✓ Event handlers registered")
+        
         memory = MemoryService(config.memory)
         logger.info("✓ Memory service initialized")
         
-        # Initialize emotion
         emotion = EmotionService(config.persona, event_bus)
         logger.info("✓ Emotion service initialized")
         
-        # Initialize Ollama client
         ollama_client = OllamaClient(config.ollama)
         logger.info("✓ Ollama client initialized")
         
-        # Initialize cryostasis
         cryostasis = CryostasisController(
             config.cryostasis,
             ollama_client,
@@ -113,16 +94,12 @@ async def main():
         )
         logger.info("✓ Cryostasis controller initialized")
         
-        # Initialize sensors
         sensors = [
             HardwareSensor(config.cryostasis),
             TimeSensor()
         ]
         logger.info("✓ Sensors initialized")
         
-        # === COGNITIVE ARCHITECTURE ===
-        
-        # Initialize cognitive orchestrator (includes all cognitive components)
         cognitive_orchestrator = CognitiveOrchestrator(
             config=config,
             event_bus=event_bus,
@@ -134,25 +111,21 @@ async def main():
         )
         logger.info("✓ Cognitive orchestrator initialized")
         
-        # Start BDI engine
         await cognitive_orchestrator.bdi_engine.start()
         logger.info("✓ BDI engine started")
         
-        # Initialize Discord adapter
         discord_adapter = DiscordAdapter(
             config.discord,
             event_bus,
-            cognitive_orchestrator  # Uses cognitive orchestrator
+            cognitive_orchestrator
         )
         logger.info("✓ Discord adapter initialized")
         
-        # Health check
         logger.info("=" * 60)
         logger.info("Performing health check...")
         health = await cognitive_orchestrator.health_check()
         logger.info(f"Health: {health}")
         
-        # Check Ollama availability
         ollama_available = await ollama_client.health_check()
         if not ollama_available:
             logger.warning("⚠ Ollama not available - limited functionality")
@@ -160,15 +133,12 @@ async def main():
         else:
             logger.info("✓ Ollama available")
         
-        # Display belief system summary
         belief_summary = await cognitive_orchestrator.belief_system.get_summary()
         logger.info(f"\n{belief_summary}")
         
-        # Start cryostasis monitoring
         await cryostasis.start_monitoring()
         logger.info("✓ Cryostasis monitoring started")
         
-        # Start Discord bot
         logger.info("=" * 60)
         logger.info("COGNITIVE AGENT READY")
         logger.info("=" * 60)
@@ -184,7 +154,6 @@ async def main():
     finally:
         logger.info("Shutting down cognitive agent...")
         
-        # Graceful shutdown
         if cognitive_orchestrator and hasattr(cognitive_orchestrator, 'bdi_engine'):
             await cognitive_orchestrator.bdi_engine.stop()
         
