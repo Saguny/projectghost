@@ -33,18 +33,24 @@ class InferenceService(IInferenceEngine):
         self,
         messages: List[Message],
         temperature: Optional[float] = None,
-        max_tokens: int = 500
+        max_tokens: Optional[int] = None # Change signature to Optional
     ) -> str:
         """Generate a response using the LLM."""
         if temperature is None:
             temperature = self.persona_config.temperature
+            
+        # Use config value if max_tokens not explicitly overridden
+        if max_tokens is None:
+            max_tokens = self.persona_config.max_output_tokens
         
         try:
             # Generate response
             response = await self.ollama_client.generate(
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens
+                max_tokens=max_tokens,
+                # Pass stop tokens from persona config
+                stop_tokens=self.persona_config.stop_tokens
             )
             
             # Loop detection
@@ -58,7 +64,8 @@ class InferenceService(IInferenceEngine):
                     response = await self.ollama_client.generate(
                         messages=messages,
                         temperature=min(temperature + 0.3, 1.5),
-                        max_tokens=max_tokens
+                        max_tokens=max_tokens,
+                        stop_tokens=self.persona_config.stop_tokens
                     )
                     self._loop_count = 0
             else:

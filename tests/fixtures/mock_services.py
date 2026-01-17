@@ -35,6 +35,12 @@ class MockEmotionProvider(IEmotionProvider):
     
     def __init__(self):
         self.state = EmotionalState(pleasure=0.5, arousal=0.5, dominance=0.5)
+        # Fix 1: Orchestrator expects pad_model.analyze_sentiment
+        self.pad_model = self.MockPADModel()
+
+    class MockPADModel:
+        def analyze_sentiment(self, text):
+            return (0.1, 0.1, 0.1)
     
     async def get_state(self) -> EmotionalState:
         return self.state
@@ -53,6 +59,15 @@ class MockEmotionProvider(IEmotionProvider):
     
     async def get_circadian_phase(self) -> str:
         return "Test Phase"
+
+    # Fix 2: Orchestrator expects this method
+    def get_contextual_modifiers(self) -> Dict[str, Any]:
+        return {
+            "mood_description": "neutral",
+            "circadian_phase": "daytime",
+            "pleasure": 0.5,
+            "arousal": 0.5
+        }
 
 
 class MockInferenceEngine(IInferenceEngine):
@@ -94,3 +109,10 @@ class MockCryostasisController(ICryostasisController):
     
     def is_hibernating(self) -> bool:
         return self._hibernating
+
+    # Fix 3: Add missing monitoring methods to prevent AttributeError
+    async def stop_monitoring(self):
+        pass
+
+    async def start_monitoring(self):
+        pass

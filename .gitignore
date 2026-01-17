@@ -43,7 +43,7 @@ env/
 # Data
 data/
 *.log
-
+models/
 # OS
 .DS_Store
 Thumbs.db

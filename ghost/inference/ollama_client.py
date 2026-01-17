@@ -40,10 +40,14 @@ class OllamaClient:
         self,
         messages: List[Message],
         temperature: float = 0.8,
-        max_tokens: int = 500
+        max_tokens: int = 200,
+        stop_tokens: List[str] = None
     ) -> str:
         """Generate completion from Ollama."""
         url = f"{self.base_url}/api/chat"
+
+        if stop_tokens is None:
+            stop_tokens = ["User:", "Assistant:"]
         
         # Convert to Ollama format
         ollama_messages = [
@@ -60,7 +64,8 @@ class OllamaClient:
                 "num_predict": max_tokens,
                 "top_k": 50,
                 "repeat_penalty": 1.2,
-                "stop": ["### Instruction:", "### Response:", "User:", "Sagun:"]
+                
+                "stop": stop_tokens
             }
         }
         

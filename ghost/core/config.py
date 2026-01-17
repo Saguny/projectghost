@@ -31,6 +31,11 @@ class PersonaConfig:
     default_arousal: float = 0.7
     default_dominance: float = 0.5
 
+    max_output_tokens: int = 150  # Default low to prevent rambling
+    stop_tokens: List[str] = field(default_factory=lambda: [
+        "<|im_end|>", "<|im_start|>", "User:", "### Instruction:"
+    ])
+
 
 @dataclass
 class CryostasisConfig:

@@ -35,9 +35,11 @@ class TestPromptBuilder:
             "circadian_phase": "morning"
         }
         
-        messages = prompt_builder.build_context(
-            recent_messages=recent_messages,
-            relevant_memories=[],
+        
+        messages = prompt_builder.build_conversation_context(
+            working_memory=recent_messages,
+            episodic_memory=[],
+            semantic_memory=[],
             emotional_context=emotional_context,
             sensory_context=""
         )

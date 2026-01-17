@@ -57,6 +57,11 @@ class Orchestrator:
             if self.cryostasis.is_hibernating():
                 logger.info("System hibernating, waking up for message")
                 await self.cryostasis.wake()
+
+            # --- CRITICAL FIX: PAUSE MONITORING ---
+            # Stop watching resources so we don't kill ourselves during inference
+            await self.cryostasis.stop_monitoring()
+            # --------------------------------------
             
             # Analyze sentiment and update emotional state
             pad_deltas = self.emotion.pad_model.analyze_sentiment(event.content)
@@ -110,6 +115,10 @@ class Orchestrator:
                 logger.error(f"Inference failed: {e}", exc_info=True)
                 response = "sorry, i'm having trouble thinking right now... maybe ollama isn't running?"
             
+            # --- CRITICAL FIX: RESUME MONITORING ---
+            await self.cryostasis.start_monitoring()
+            # ---------------------------------------
+
             generation_time = (datetime.now(timezone.utc) - start_time).total_seconds() * 1000
             
             # Store assistant response
@@ -134,6 +143,9 @@ class Orchestrator:
             return response
             
         except Exception as e:
+            # Ensure monitoring restarts even if we crash
+            if hasattr(self, 'cryostasis'):
+                await self.cryostasis.start_monitoring()
             logger.error(f"Error handling message: {e}", exc_info=True)
             return "sorry, i'm having trouble thinking right now..."
     
@@ -163,8 +175,12 @@ class Orchestrator:
             )
             
             try:
+                # Pause monitoring for impulse generation too
+                await self.cryostasis.stop_monitoring()
                 response = await self.inference.generate([impulse_message])
+                await self.cryostasis.start_monitoring()
             except Exception as e:
+                await self.cryostasis.start_monitoring()
                 logger.error(f"Autonomous generation failed: {e}", exc_info=True)
                 return None
             
