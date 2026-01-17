@@ -1,15 +1,16 @@
-import logging
-import json
-import re
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
+"""
+Cognitive Core: Bicameral Mind (Updated for Personality Evolution)
 
-from ghost.core.interfaces import Message
-from ghost.inference.ollama_client import OllamaClient
+NEW FEATURES:
+1. Self-Reflection: AI evaluates if interaction changed its opinions
+2. Opinion Drift & Confidence: AI forms/updates beliefs about itself
+3. Ego Awareness: AI references its own past opinions in reasoning
 
-logger = logging.getLogger(__name__)
-
+Think Stage Now Asks:
+- "Did this change my opinion on anything?"
+- "What do I believe about this topic?"
+- "Am I confident in my stance?"
+"""
 
 import logging
 import json
@@ -51,22 +52,19 @@ class ThinkOutput:
         clean_str = re.sub(r'^```\s*', '', clean_str, flags=re.MULTILINE)
         clean_str = re.sub(r'```$', '', clean_str, flags=re.MULTILINE).strip()
 
-        # 2. Aggressive Comment Stripping (// and #)
+        # 2. Aggressive Comment Stripping
         clean_str = re.sub(r'//.*', '', clean_str)
         clean_str = re.sub(r'#.*', '', clean_str)
 
-        # 3. Try to find the largest JSON-like structure
-        # (Greedy match to capture as much as possible, including broken ends)
+        # 3. Find largest JSON-like structure
         match = re.search(r'\{[\s\S]*', clean_str) 
         if match:
             clean_str = match.group(0)
 
         try:
-            # First Attempt: Direct Parse
             data = json.loads(clean_str)
         except json.JSONDecodeError:
             try:
-                # Second Attempt: Repair syntax
                 logger.debug("JSON decode error, attempting aggressive repair...")
                 repaired = cls._repair_json(clean_str)
                 data = json.loads(repaired)
@@ -89,17 +87,10 @@ class ThinkOutput:
 
     @staticmethod
     def _repair_json(json_str: str) -> str:
-        """
-        Fixes missing commas, quotes, and unclosed braces.
-        """
-        # 1. Fix missing commas between key-value pairs
-        # Look for "value" "next_key" pattern
+        """Fixes missing commas, quotes, and unclosed braces."""
         json_str = re.sub(r'(["\d\]\}truefalse])\s*\n\s*"', r'\1,\n"', json_str)
-        
-        # 2. Fix trailing commas before closing braces
         json_str = re.sub(r',\s*(\}|\])', r'\1', json_str)
 
-        # 3. Balance Braces (The "Cut-off" Fix)
         open_braces = json_str.count('{')
         close_braces = json_str.count('}')
         open_brackets = json_str.count('[')
@@ -117,7 +108,6 @@ class ThinkOutput:
 
     @classmethod
     def _sanity_fallback(cls, raw_text: str) -> "ThinkOutput":
-        # Keep existing fallback logic
         sanitized = re.sub(r'https?://\S+', '', raw_text).strip()
         speech_plan = sanitized[:100] if sanitized else "acknowledge"
         return cls(
@@ -148,7 +138,7 @@ class CognitiveCore:
         needs: Dict[str, float]
     ) -> tuple[ThinkOutput, str]:
 
-        # 1. THINK STAGE
+        # 1. THINK STAGE (WITH SELF-REFLECTION)
         think_output = await self._think_stage(
             user_input=user_input,
             context=context,
@@ -187,9 +177,9 @@ class CognitiveCore:
         try:
             think_json = await self.ollama_client.generate(
                 messages=think_messages,
-                temperature=0.3, # Low temp for logic
+                temperature=0.3,
                 max_tokens=600,
-                json_mode=True   # Force JSON
+                json_mode=True
             )
             return ThinkOutput.from_json(think_json)
 
@@ -208,7 +198,6 @@ class CognitiveCore:
         user_input: str
     ) -> str:
         
-        # 1. Dynamic System Prompt (Inject the "Thought")
         system_content = (
             f"{self.persona_config.system_prompt}\n\n"
             f"[INTERNAL STATE]\n"
@@ -221,18 +210,7 @@ class CognitiveCore:
             Message(role="system", content=system_content, metadata={})
         ]
         
-        # 2. FEW-SHOT EXAMPLES (The "How")
-        # Fixes personality drift
-        if hasattr(self.persona_config, 'examples') and self.persona_config.examples:
-            for ex in self.persona_config.examples:
-                parts = ex.split("\nAssistant:")
-                if len(parts) == 2:
-                    u_text = parts[0].replace("User:", "").strip()
-                    a_text = parts[1].strip()
-                    messages.append(Message(role="user", content=u_text, metadata={"type": "example"}))
-                    messages.append(Message(role="assistant", content=a_text, metadata={"type": "example"}))
-
-        # 3. Add Recent Conversation History (Context)
+        # Add recent conversation history
         recent_history = context.get("working", [])[-6:]
         for msg in recent_history:
             if msg.content.strip() != user_input.strip():
@@ -242,7 +220,7 @@ class CognitiveCore:
                     metadata={}
                 ))
 
-        # 4. Add Current User Input
+        # Add current user input
         if not messages or messages[-1].content.strip() != user_input.strip():
              messages.append(Message(
                 role="user",
@@ -250,7 +228,7 @@ class CognitiveCore:
                 metadata={}
             ))
             
-        # 5. PERSONA ANCHOR (The "Glue")
+        # Persona anchor
         messages.append(Message(
             role="system", 
             content=f"(Remember: You are {self.persona_config.name}. Speak with {think_output.emotion} energy.)", 
@@ -277,37 +255,79 @@ class CognitiveCore:
         beliefs: Dict[str, Any],
         needs: Dict[str, float]
     ) -> str:
+        """
+        Format the Think stage input.
         
-        # Format beliefs for clarity
+        NEW: Includes agent's own opinions and traits for self-reflection.
+        """
+        
+        # Extract user beliefs
+        user_beliefs = beliefs.get('user', {})
         user_facts = []
-        self_traits = []
+        for k, v in user_beliefs.items():
+            user_facts.append(f"- {k}: {v}")
         
-        for k, v in beliefs.items():
-            if k in ["is_ai", "can_think", "name"] or "likes" in k or "dislikes" in k: 
-                self_traits.append(f"- {k}: {v}")
-            else:
-                user_facts.append(f"- {k}: {v}")
-
-        belief_summary = "KNOWN FACTS (User):\n" + ("\n".join(user_facts[:5]) or "None")
-        self_summary = "MY TRAITS (Self):\n" + ("\n".join(self_traits[:5]) or "None")
+        # Extract agent beliefs (THE EGO)
+        agent_profile = beliefs.get('agent', {})
+        agent_opinions = agent_profile.get('opinions', {})
+        agent_traits = agent_profile.get('traits', {})
+        
+        self_knowledge = []
+        for k, v in agent_opinions.items():
+            self_knowledge.append(f"- {k}: {v}")
+        for k, v in agent_traits.items():
+            self_knowledge.append(f"- {k}: {v}")
+        
+        user_summary = "KNOWN FACTS (User):\n" + ("\n".join(user_facts[:5]) or "None")
+        self_summary = "MY OPINIONS & TRAITS (Self):\n" + ("\n".join(self_knowledge[:5]) or "None yet")
         
         return f"""USER: {user_input}
-{belief_summary}
+
+{user_summary}
+
 {self_summary}
+
 NEEDS: {needs}
-Analyze and output JSON."""
+
+INSTRUCTIONS:
+1. Analyze the user's message
+2. Check: Did this interaction challenge or change any of MY opinions?
+3. If yes, output a belief_update with entity='agent'
+4. Respond with valid JSON"""
 
     def _build_think_prompt(self) -> str:
-        return """You are the INTERNAL REASONING SYSTEM.
-Output ONLY valid JSON.
+        """
+        Build the Think stage system prompt.
+        
+        NEW: Instructs the model to reflect on opinion changes.
+        """
+        return """You are the INTERNAL REASONING SYSTEM for an AI with PERSISTENT PERSONALITY.
+
+Your job:
+1. Analyze the user's message
+2. Determine intent and emotional response
+3. SELF-REFLECTION: Did this interaction change my opinion on anything?
+4. If my opinion changed, output a belief_update with entity='agent'
+
+Output ONLY valid JSON:
 {
-  "intent": "str",
-  "emotion": "str",
-  "belief_updates": [{"entity": "agent", "relation": "likes", "value": "x"}],
+  "intent": "text_response | question | disagreement | agreement",
+  "emotion": "happy | sad | excited | neutral | curious | defensive",
+  "belief_updates": [
+    {"entity": "user", "relation": "likes", "value": "cats"},
+    {"entity": "agent", "relation": "opinion_on_cats", "value": "love_them"}
+  ],
   "memory_queries": [],
-  "needs_update": {},
+  "needs_update": {"curiosity": 0.1},
   "action_request": null,
-  "speech_plan": "what to say",
-  "confidence": 0.0,
-  "reasoning_trace": "str"
-}"""
+  "speech_plan": "what to say in your own voice",
+  "confidence": 0.8,
+  "reasoning_trace": "brief explanation of your thinking"
+}
+
+CRITICAL RULES:
+- belief_updates with entity='agent' are YOUR opinions, not facts
+- Only update agent beliefs if the interaction genuinely changed your mind
+- confidence should reflect how certain you are about your stance
+- If you disagree with the user, set intent='disagreement' and explain why in speech_plan
+"""

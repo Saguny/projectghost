@@ -1,22 +1,19 @@
 """
-Cognitive Orchestrator: Unified Agent Control
+Cognitive Orchestrator: Unified Agent Control (Updated for Personality Evolution)
+
+NEW FEATURE: "Ego Injection"
+- Fetches BOTH user beliefs AND agent beliefs
+- Passes agent's self-knowledge into CognitiveCore
+- Enables opinion formation and personality continuity
 
 Architecture:
     User Input →
-        1. Cognitive Core (Think → Validate → Speak)
-        2. Belief System (Fact storage/retrieval)
-        3. Validator (Reality check)
-        4. BDI Engine (Autonomy)
+        1. Gather context (memory + sensors + BELIEFS)
+        2. Cognitive Core (Think → Validate → Speak)
+        3. Belief System (Store user facts + AGENT OPINIONS)
+        4. Validator (Reality check)
+        5. BDI Engine (Autonomy)
     → Output
-    
-Replaces:
-    ghost/core/orchestrator.py (chatbot pattern)
-    
-Enforces:
-    - Think-before-speak
-    - Fact verification
-    - Reality constraints
-    - Goal-driven autonomy
 """
 
 import logging
@@ -103,11 +100,11 @@ class CognitiveOrchestrator:
         Handle user message with full cognitive pipeline.
         
         Pipeline:
-            1. Context gathering (memory + sensors)
-            2. Think stage (internal reasoning)
+            1. Context gathering (memory + sensors + BELIEFS)
+            2. Think stage (internal reasoning with EGO AWARENESS)
             3. Validation (reality check)
             4. Speak stage (character dialogue)
-            5. Belief updates
+            5. Belief updates (USER + AGENT)
             6. Memory storage
             7. Need satisfaction
         """
@@ -122,23 +119,33 @@ class CognitiveOrchestrator:
             # Pause monitoring during inference
             await self.cryostasis.stop_monitoring()
             
-            # Step 1: Gather context
+            # Step 1: Gather context (INCLUDING BELIEFS)
             context = await self._gather_context(event.content)
-            beliefs = await self.belief_system.get_all('user')
+            
+            # NEW: Fetch BOTH user beliefs AND agent beliefs
+            user_beliefs = await self.belief_system.get_all('user')
+            agent_profile = await self.belief_system.get_agent_profile()
+            
+            # Combine into unified belief structure
+            beliefs = {
+                'user': user_beliefs,
+                'agent': agent_profile
+            }
+            
             needs = self.bdi_engine.get_need_state()
             
             # Step 2: Cognitive processing (Think → Validate → Speak)
             think_output, speech = await self._cognitive_process(
                 user_input=event.content,
                 context=context,
-                beliefs=beliefs,
+                beliefs=beliefs,  # NOW INCLUDES AGENT'S SELF-KNOWLEDGE
                 needs=needs
             )
             
             # Step 3: Update emotional state (from think output)
             await self._update_emotion(think_output)
             
-            # Step 4: Store beliefs (from think output)
+            # Step 4: Store beliefs (USER + AGENT)
             await self._store_beliefs(think_output, event.user_name)
             
             # Step 5: Store memory
@@ -185,11 +192,11 @@ class CognitiveOrchestrator:
         while attempt < max_attempts:
             attempt += 1
             
-            # THINK
+            # THINK (NOW WITH AGENT SELF-KNOWLEDGE)
             think_output, speech = await self.cognitive_core.process(
                 user_input=user_input,
                 context=context,
-                beliefs=beliefs,
+                beliefs=beliefs,  # Contains user + agent
                 needs=needs
             )
             
@@ -290,7 +297,12 @@ class CognitiveOrchestrator:
         think_output: ThinkOutput,
         user_name: str
     ):
-        """Store beliefs from think output"""
+        """
+        Store beliefs from think output.
+        
+        NOW SUPPORTS: Storing agent beliefs (entity='agent')
+        This is how the AI remembers its own opinions!
+        """
         
         for belief_update in think_output.belief_updates:
             entity = belief_update.get('entity', 'user')
@@ -303,6 +315,13 @@ class CognitiveOrchestrator:
             # Special handling for user identity
             if entity == 'user' and relation == 'name' and not value:
                 value = user_name
+            
+            # NEW: Log when agent updates its own beliefs
+            if entity == 'agent':
+                logger.info(
+                    f"🧠 PERSONALITY UPDATE: Agent believes "
+                    f"({relation}, {value})"
+                )
             
             await self.belief_system.store(
                 entity=entity,
@@ -368,9 +387,11 @@ class CognitiveOrchestrator:
                 logger.debug("Skipping impulse (hibernating)")
                 return None
             
-            # Gather context
+            # Gather context (including beliefs)
             context = await self._gather_context(event.trigger_reason)
-            beliefs = await self.belief_system.get_all('user')
+            user_beliefs = await self.belief_system.get_all('user')
+            agent_profile = await self.belief_system.get_agent_profile()
+            beliefs = {'user': user_beliefs, 'agent': agent_profile}
             needs = self.bdi_engine.get_need_state()
             
             # Pause monitoring
@@ -420,6 +441,7 @@ class CognitiveOrchestrator:
         """System health check"""
         
         belief_count = len(await self.belief_system.search(limit=1000))
+        agent_profile = await self.belief_system.get_agent_profile()
         needs = self.bdi_engine.get_need_state()
         
         return {
@@ -427,6 +449,8 @@ class CognitiveOrchestrator:
             "cognitive_core": "active",
             "validator": "active",
             "belief_system": f"{belief_count} beliefs",
+            "agent_opinions": len(agent_profile['opinions']),
+            "agent_traits": len(agent_profile['traits']),
             "bdi_engine": "active",
             "needs": needs,
             "hibernating": self.cryostasis.is_hibernating(),

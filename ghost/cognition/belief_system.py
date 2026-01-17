@@ -1,24 +1,22 @@
 """
-Belief System: Knowledge Graph for Facts
+Belief System: Knowledge Graph for Facts (Updated for Personality Evolution)
 
 Architecture:
     Stores beliefs as (entity, relation, value) triplets
-    Enables fact verification and contradiction detection
+    NOW SUPPORTS: entity='agent' for self-memory and personality traits
     
 Examples:
     (user, name, "Sagun")
     (user, lives_in, "Berlin")
-    (agent, is_ai, True)
-    (agent, has_body, False)
+    (agent, is_ai, True)  # Core identity
+    (agent, likes, "cats")  # PERSONALITY TRAIT
+    (agent, opinion_on, "pineapple_pizza", "love_it")  # EVOLVING OPINION
     
 Purpose:
     - Prevent hallucinations
     - Enforce consistency
     - Enable fact-based reasoning
-    
-Storage:
-    SQLite for simplicity and persistence
-    Could scale to Neo4j for complex graphs
+    - ALLOW AGENT SELF-MEMORY AND OPINION FORMATION
 """
 
 import logging
@@ -39,11 +37,14 @@ class BeliefSystem:
     Schema:
         (entity, relation, value, timestamp, confidence, source)
     
+    NEW: Supports entity='agent' for self-memory and personality
+    
     Operations:
         - store(entity, relation, value)
         - query(entity, relation) → value
         - verify(entity, relation, value) → bool
         - get_all(entity) → {relation: value}
+        - get_agent_profile() → agent's personality and opinions
     """
     
     def __init__(self, db_path: str = "data/beliefs.db"):
@@ -110,6 +111,7 @@ class BeliefSystem:
             ('agent', 'can_remember', 'true', 1.0, 'core'),
             ('agent', 'can_reason', 'true', 1.0, 'core'),
             ('agent', 'can_converse', 'true', 1.0, 'core'),
+            ('agent', 'can_form_opinions', 'true', 1.0, 'core'),  # NEW
         ]
         
         for entity, relation, value, confidence, source in core_beliefs:
@@ -245,6 +247,73 @@ class BeliefSystem:
             logger.error(f"Get all failed: {e}")
             return {}
     
+    async def get_agent_profile(self) -> Dict[str, Any]:
+        """
+        NEW METHOD: Get agent's personality profile
+        
+        Returns all beliefs where entity='agent', excluding core immutables.
+        This is the "Ego" - what the AI knows about itself.
+        
+        Returns:
+            {
+                'identity': {...},  # Core facts
+                'opinions': {...},  # Likes/dislikes
+                'traits': {...},    # Personality attributes
+                'memories': {...}   # Self-referenced memories
+            }
+        """
+        try:
+            all_agent_beliefs = await self.get_all('agent')
+            
+            # Separate core vs personality
+            core_relations = {
+                'is_ai', 'has_body', 'has_location', 'exists_physically',
+                'can_physical_action', 'name', 'type', 'can_think',
+                'can_remember', 'can_reason', 'can_converse', 'can_form_opinions'
+            }
+            
+            identity = {}
+            opinions = {}
+            traits = {}
+            memories = {}
+            
+            for relation, value in all_agent_beliefs.items():
+                if relation in core_relations:
+                    identity[relation] = value
+                elif relation.startswith('likes_') or relation.startswith('dislikes_'):
+                    opinions[relation] = value
+                elif relation.startswith('opinion_on_'):
+                    opinions[relation] = value
+                elif relation.startswith('trait_'):
+                    traits[relation] = value
+                elif relation.startswith('memory_'):
+                    memories[relation] = value
+                else:
+                    # Default to opinions
+                    opinions[relation] = value
+            
+            logger.debug(
+                f"Agent profile: {len(identity)} identity, "
+                f"{len(opinions)} opinions, {len(traits)} traits, "
+                f"{len(memories)} memories"
+            )
+            
+            return {
+                'identity': identity,
+                'opinions': opinions,
+                'traits': traits,
+                'memories': memories
+            }
+            
+        except Exception as e:
+            logger.error(f"Get agent profile failed: {e}")
+            return {
+                'identity': {},
+                'opinions': {},
+                'traits': {},
+                'memories': {}
+            }
+    
     async def search(
         self,
         entity: Optional[str] = None,
@@ -325,6 +394,9 @@ class BeliefSystem:
                 """)
                 total = cursor.fetchone()['count']
                 
+                # Get agent profile
+                agent_profile = await self.get_agent_profile()
+                
                 # Get recent beliefs
                 cursor = conn.execute("""
                     SELECT entity, relation, value FROM beliefs
@@ -340,6 +412,8 @@ class BeliefSystem:
                 return f"""
 Belief System Status:
 - Total beliefs: {total}
+- Agent opinions: {len(agent_profile['opinions'])}
+- Agent traits: {len(agent_profile['traits'])}
 - Recent:
 {chr(10).join(recent)}
 """
