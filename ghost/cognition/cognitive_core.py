@@ -156,8 +156,13 @@ class CognitiveCore:
                 messages=think_messages,
                 temperature=0.4,
                 max_tokens=600,
-                stop_tokens=["```", "THINK_END"]
+                stop_tokens=[]  # FIXED: Don't use stop tokens for JSON generation
             )
+            
+            # FIXED: Check for empty response
+            if not think_json or not think_json.strip():
+                logger.error("Ollama returned empty response for think stage")
+                raise ValueError("Empty response from Ollama")
 
             think_output = ThinkOutput.from_json(think_json)
 
@@ -267,24 +272,19 @@ Stay in character. Use your personality.
 """
 
     def _build_think_prompt(self) -> str:
-        return """
-You are the INTERNAL REASONING SYSTEM for an AI agent.
+        # FIXED: Simplified and clearer prompt for JSON generation
+        return """You are the INTERNAL REASONING SYSTEM for an AI agent.
 
-Your job is to THINK, not speak.
+Your job is to THINK, not speak. Analyze the user's input and output ONLY valid JSON.
 
-Output structured JSON reasoning in this exact format:
+Output this exact JSON structure (no extra text, no markdown, no explanations):
 
 {
   "intent": "what user wants",
   "emotion": "detected emotional tone",
-  "belief_updates": [
-    {"entity": "user", "relation": "likes", "value": "cats"}
-  ],
-  "memory_queries": ["specific facts to recall"],
-  "needs_update": {
-    "social": 0.1,
-    "energy": -0.05
-  },
+  "belief_updates": [],
+  "memory_queries": [],
+  "needs_update": {},
   "action_request": null,
   "speech_plan": "brief summary of what to say",
   "confidence": 0.8,
@@ -292,13 +292,9 @@ Output structured JSON reasoning in this exact format:
 }
 
 CRITICAL RULES:
-- You are NOT speaking to the user
-- Output ONLY valid JSON (no markdown, no preamble)
+- Output ONLY valid JSON (no preamble, no markdown, no extra text)
 - Be analytical, not conversational
-- Focus on facts and logic
-- Identify belief updates to store
-- Plan speech without generating it
-"""
+- Focus on facts and logic"""
 
     def _build_speak_prompt(self) -> str:
         base = self.persona_config.system_prompt
@@ -317,4 +313,6 @@ Rules:
 - Reference your internal speech plan
 - Be natural and conversational
 - Don't mention "internal reasoning"
+
+You're speaking to the user now.
 """
