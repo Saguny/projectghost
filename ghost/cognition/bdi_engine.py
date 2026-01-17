@@ -32,7 +32,7 @@ Decision Logic:
 import logging
 import asyncio
 import json
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -466,31 +466,42 @@ class BDIEngine:
             logger.error(f"Failed to save BDI state: {e}")
     
     def _load_state(self):
-        """Load BDI state from disk."""
+        """Load BDI state from disk with safety checks."""
         if not self._state_file.exists():
-            logger.info("No saved BDI state found, using defaults")
             return
         
         try:
             with open(self._state_file) as f:
                 state = json.load(f)
             
+            # Helper to parse time safely
+            def safe_parse_time(iso_str: Any, default: datetime) -> datetime:
+                if not isinstance(iso_str, str):
+                    return default
+                try:
+                    return datetime.fromisoformat(iso_str)
+                except ValueError:
+                    return default
+
             # Restore need values
+            current_time = datetime.now(timezone.utc)
             for name, data in state.get('needs', {}).items():
                 if name in self.needs:
-                    self.needs[name].value = data.get('value', 0.5)
-                    self.needs[name].last_satisfied = datetime.fromisoformat(
-                        data.get('last_satisfied')
-                    )
-                    self.needs[name].last_decay = datetime.fromisoformat(
-                        data.get('last_decay')
-                    )
+                    self.needs[name].value = float(data.get('value', 0.5))
+                    
+                    # Safe timestamp parsing
+                    last_sat = data.get('last_satisfied')
+                    self.needs[name].last_satisfied = safe_parse_time(last_sat, current_time)
+                    
+                    # Safe decay parsing (handle migration from v1 to v2)
+                    last_dec = data.get('last_decay')
+                    self.needs[name].last_decay = safe_parse_time(last_dec, current_time)
             
-            self._last_action = datetime.fromisoformat(
-                state.get('last_action', datetime.now(timezone.utc).isoformat())
-            )
+            # Restore last action
+            last_act = state.get('last_action')
+            self._last_action = safe_parse_time(last_act, current_time)
             
             logger.info("✓ Loaded BDI state from disk")
             
         except Exception as e:
-            logger.warning(f"Failed to load BDI state: {e}, using defaults")
+            logger.warning(f"Failed to load BDI state (using defaults): {e}")
