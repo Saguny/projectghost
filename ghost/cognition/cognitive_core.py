@@ -11,6 +11,19 @@ from ghost.inference.ollama_client import OllamaClient
 logger = logging.getLogger(__name__)
 
 
+import logging
+import json
+import re
+from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, asdict
+from datetime import datetime, timezone
+
+from ghost.core.interfaces import Message
+from ghost.inference.ollama_client import OllamaClient
+
+logger = logging.getLogger(__name__)
+
+
 @dataclass
 class ThinkOutput:
     intent: str
@@ -33,63 +46,90 @@ class ThinkOutput:
 
     @classmethod
     def from_json(cls, json_str: str) -> "ThinkOutput":
+        # 1. Strip Markdown and Code Blocks
+        clean_str = re.sub(r'^```json\s*', '', json_str, flags=re.MULTILINE)
+        clean_str = re.sub(r'^```\s*', '', clean_str, flags=re.MULTILINE)
+        clean_str = re.sub(r'```$', '', clean_str, flags=re.MULTILINE).strip()
+
+        # 2. Aggressive Comment Stripping (// and #)
+        clean_str = re.sub(r'//.*', '', clean_str)
+        clean_str = re.sub(r'#.*', '', clean_str)
+
+        # 3. Try to find the largest JSON-like structure
+        # (Greedy match to capture as much as possible, including broken ends)
+        match = re.search(r'\{[\s\S]*', clean_str) 
+        if match:
+            clean_str = match.group(0)
+
         try:
-            json_match = re.search(r'\{[\s\S]*\}', json_str)
-            
-            if not json_match:
-                logger.warning("No JSON structure found in response, using sanity fallback")
+            # First Attempt: Direct Parse
+            data = json.loads(clean_str)
+        except json.JSONDecodeError:
+            try:
+                # Second Attempt: Repair syntax
+                logger.debug("JSON decode error, attempting aggressive repair...")
+                repaired = cls._repair_json(clean_str)
+                data = json.loads(repaired)
+                logger.info("JSON auto-repair successful")
+            except Exception as e:
+                logger.error(f"JSON parsing failed after repair: {e}")
                 return cls._sanity_fallback(json_str)
-            
-            extracted = json_match.group(0)
-            
-            lines = extracted.split("\n")
-            cleaned_lines = []
-            for line in lines:
-                stripped = line.strip()
-                if stripped and not stripped.startswith("//"):
-                    cleaned_lines.append(line)
-            
-            cleaned = "\n".join(cleaned_lines)
-            data = json.loads(cleaned)
 
-            return cls(
-                intent=data.get("intent", "unknown"),
-                emotion=data.get("emotion", "neutral"),
-                belief_updates=data.get("belief_updates", []),
-                memory_queries=data.get("memory_queries", []),
-                needs_update=data.get("needs_update", {}),
-                action_request=data.get("action_request"),
-                speech_plan=data.get("speech_plan", ""),
-                confidence=data.get("confidence", 0.5),
-                reasoning_trace=data.get("reasoning_trace", "")
-            )
+        return cls(
+            intent=data.get("intent", "text_response"),
+            emotion=data.get("emotion", "neutral"),
+            belief_updates=data.get("belief_updates", []),
+            memory_queries=data.get("memory_queries", []),
+            needs_update=data.get("needs_update", {}),
+            action_request=data.get("action_request"),
+            speech_plan=data.get("speech_plan", "continue conversation"),
+            confidence=data.get("confidence", 0.5),
+            reasoning_trace=data.get("reasoning_trace", "")
+        )
 
-        except (json.JSONDecodeError, KeyError, TypeError) as e:
-            logger.error(f"JSON parsing failed: {e}")
-            return cls._sanity_fallback(json_str)
+    @staticmethod
+    def _repair_json(json_str: str) -> str:
+        """
+        Fixes missing commas, quotes, and unclosed braces.
+        """
+        # 1. Fix missing commas between key-value pairs
+        # Look for "value" "next_key" pattern
+        json_str = re.sub(r'(["\d\]\}truefalse])\s*\n\s*"', r'\1,\n"', json_str)
+        
+        # 2. Fix trailing commas before closing braces
+        json_str = re.sub(r',\s*(\}|\])', r'\1', json_str)
+
+        # 3. Balance Braces (The "Cut-off" Fix)
+        open_braces = json_str.count('{')
+        close_braces = json_str.count('}')
+        open_brackets = json_str.count('[')
+        close_brackets = json_str.count(']')
+
+        while open_brackets > close_brackets:
+            json_str += ']'
+            close_brackets += 1
+            
+        while open_braces > close_braces:
+            json_str += '}'
+            close_braces += 1
+            
+        return json_str
 
     @classmethod
     def _sanity_fallback(cls, raw_text: str) -> "ThinkOutput":
+        # Keep existing fallback logic
         sanitized = re.sub(r'https?://\S+', '', raw_text).strip()
-        
-        emotion = "confused"
-        if any(word in sanitized.lower() for word in ["okay", "fine", "good"]):
-            emotion = "calm"
-        elif any(word in sanitized.lower() for word in ["sorry", "trouble", "issue"]):
-            emotion = "apologetic"
-        
-        speech_plan = sanitized[:100] if sanitized else "acknowledge the message"
-        
+        speech_plan = sanitized[:100] if sanitized else "acknowledge"
         return cls(
             intent="text_response",
-            emotion=emotion,
+            emotion="neutral",
             belief_updates=[],
             memory_queries=[],
             needs_update={},
             action_request=None,
             speech_plan=speech_plan,
             confidence=0.3,
-            reasoning_trace=f"Fallback mode: raw text detected. Length={len(raw_text)}"
+            reasoning_trace=f"Fallback: {len(raw_text)} chars"
         )
 
 
@@ -98,7 +138,6 @@ class CognitiveCore:
         self.ollama_client = ollama_client
         self.persona_config = persona_config
         self.think_system_prompt = self._build_think_prompt()
-        self.speak_system_prompt = self._build_speak_prompt()
         logger.info("Cognitive core initialized (bicameral architecture)")
 
     async def process(
@@ -109,6 +148,7 @@ class CognitiveCore:
         needs: Dict[str, float]
     ) -> tuple[ThinkOutput, str]:
 
+        # 1. THINK STAGE
         think_output = await self._think_stage(
             user_input=user_input,
             context=context,
@@ -116,14 +156,13 @@ class CognitiveCore:
             needs=needs
         )
 
-        logger.debug(
-            f"Think output: intent={think_output.intent}, "
-            f"confidence={think_output.confidence:.2f}"
-        )
+        logger.debug(f"Think intent: {think_output.intent} | Emotion: {think_output.emotion}")
 
+        # 2. SPEAK STAGE
         speech = await self._speak_stage(
             think_output=think_output,
-            context=context
+            context=context,
+            user_input=user_input
         )
 
         return think_output, speech
@@ -140,12 +179,7 @@ class CognitiveCore:
             Message(role="system", content=self.think_system_prompt, metadata={}),
             Message(
                 role="user",
-                content=self._format_think_input(
-                    user_input=user_input,
-                    context=context,
-                    beliefs=beliefs,
-                    needs=needs
-                ),
+                content=self._format_think_input(user_input, context, beliefs, needs),
                 metadata={}
             )
         ]
@@ -153,62 +187,88 @@ class CognitiveCore:
         try:
             think_json = await self.ollama_client.generate(
                 messages=think_messages,
-                temperature=0.4,
+                temperature=0.3, # Low temp for logic
                 max_tokens=600,
-                stop_tokens=[]
+                json_mode=True   # Force JSON
             )
-            
-            if not think_json or not think_json.strip():
-                logger.error("Ollama returned empty response for think stage")
-                raise ValueError("Empty response from Ollama")
-
-            think_output = ThinkOutput.from_json(think_json)
+            return ThinkOutput.from_json(think_json)
 
         except Exception as e:
-            logger.error(f"Think stage failed: {e}", exc_info=True)
-
-            think_output = ThinkOutput(
-                intent="error",
-                emotion="confused",
-                belief_updates=[],
-                memory_queries=[],
-                needs_update={},
-                action_request=None,
-                speech_plan="acknowledge error gracefully",
-                confidence=0.0,
-                reasoning_trace=f"Think stage exception: {e}"
+            logger.error(f"Think stage failed: {e}")
+            return ThinkOutput(
+                intent="error", emotion="confused", belief_updates=[], 
+                memory_queries=[], needs_update={}, action_request=None, 
+                speech_plan="apologize", confidence=0.0, reasoning_trace=str(e)
             )
-
-        return think_output
 
     async def _speak_stage(
         self,
         think_output: ThinkOutput,
-        context: Dict[str, Any]
+        context: Dict[str, Any],
+        user_input: str
     ) -> str:
+        
+        # 1. Dynamic System Prompt (Inject the "Thought")
+        system_content = (
+            f"{self.persona_config.system_prompt}\n\n"
+            f"[INTERNAL STATE]\n"
+            f"Mood: {think_output.emotion}\n"
+            f"Goal: {think_output.speech_plan}\n"
+            f"Instruction: Respond naturally to the user. Do NOT mention your internal state."
+        )
 
-        speak_messages = [
-            Message(role="system", content=self.speak_system_prompt, metadata={}),
-            Message(
-                role="user",
-                content=self._format_speak_input(think_output, context),
-                metadata={}
-            )
+        messages = [
+            Message(role="system", content=system_content, metadata={})
         ]
+        
+        # 2. FEW-SHOT EXAMPLES (The "How")
+        # Fixes personality drift
+        if hasattr(self.persona_config, 'examples') and self.persona_config.examples:
+            for ex in self.persona_config.examples:
+                parts = ex.split("\nAssistant:")
+                if len(parts) == 2:
+                    u_text = parts[0].replace("User:", "").strip()
+                    a_text = parts[1].strip()
+                    messages.append(Message(role="user", content=u_text, metadata={"type": "example"}))
+                    messages.append(Message(role="assistant", content=a_text, metadata={"type": "example"}))
+
+        # 3. Add Recent Conversation History (Context)
+        recent_history = context.get("working", [])[-6:]
+        for msg in recent_history:
+            if msg.content.strip() != user_input.strip():
+                messages.append(Message(
+                    role=msg.role,
+                    content=msg.content,
+                    metadata={}
+                ))
+
+        # 4. Add Current User Input
+        if not messages or messages[-1].content.strip() != user_input.strip():
+             messages.append(Message(
+                role="user",
+                content=user_input,
+                metadata={}
+            ))
+            
+        # 5. PERSONA ANCHOR (The "Glue")
+        messages.append(Message(
+            role="system", 
+            content=f"(Remember: You are {self.persona_config.name}. Speak with {think_output.emotion} energy.)", 
+            metadata={"type": "anchor"}
+        ))
 
         try:
             speech = await self.ollama_client.generate(
-                messages=speak_messages,
+                messages=messages,
                 temperature=self.persona_config.temperature,
                 max_tokens=self.persona_config.max_output_tokens,
                 stop_tokens=self.persona_config.stop_tokens
             )
-
             return speech.strip()
 
         except Exception as e:
-            logger.error(f"Speak stage failed: {e}", exc_info=True)
-            return "sorry, i'm having trouble thinking right now..."
+            logger.error(f"Speak stage failed: {e}")
+            return "..."
 
     def _format_think_input(
         self,
@@ -217,99 +277,37 @@ class CognitiveCore:
         beliefs: Dict[str, Any],
         needs: Dict[str, float]
     ) -> str:
+        
+        # Format beliefs for clarity
+        user_facts = []
+        self_traits = []
+        
+        for k, v in beliefs.items():
+            if k in ["is_ai", "can_think", "name"] or "likes" in k or "dislikes" in k: 
+                self_traits.append(f"- {k}: {v}")
+            else:
+                user_facts.append(f"- {k}: {v}")
 
-        memory_context = "\n".join(
-            f"- {msg.content}" for msg in context.get("semantic", [])[:3]
-        )
-
-        belief_summary = "\n".join(
-            f"- {k}: {v}" for k, v in list(beliefs.items())[:5]
-        )
-
-        needs_summary = "\n".join(
-            f"- {k}: {v:.2f}" for k, v in needs.items()
-        )
-
-        return f"""
-USER INPUT: "{user_input}"
-
-RECALLED FACTS:
-{memory_context or "None"}
-
-CURRENT BELIEFS:
-{belief_summary or "None"}
-
-INTERNAL NEEDS:
-{needs_summary}
-
-TASK: Analyze this input and output structured reasoning as JSON.
-"""
-
-    def _format_speak_input(
-        self,
-        think_output: ThinkOutput,
-        context: Dict[str, Any]
-    ) -> str:
-
-        recent = context.get("working", [])[-3:]
-        recent_text = "\n".join(
-            f"{msg.role}: {msg.content}" for msg in recent
-        )
-
-        return f"""
-INTERNAL REASONING:
-Intent: {think_output.intent}
-Emotion: {think_output.emotion}
-Speech Plan: {think_output.speech_plan}
-
-RECENT CONVERSATION:
-{recent_text}
-
-TASK: Generate natural dialogue based on your internal reasoning.
-Stay in character. Use your personality.
-"""
+        belief_summary = "KNOWN FACTS (User):\n" + ("\n".join(user_facts[:5]) or "None")
+        self_summary = "MY TRAITS (Self):\n" + ("\n".join(self_traits[:5]) or "None")
+        
+        return f"""USER: {user_input}
+{belief_summary}
+{self_summary}
+NEEDS: {needs}
+Analyze and output JSON."""
 
     def _build_think_prompt(self) -> str:
-        return """You are the INTERNAL REASONING SYSTEM for an AI agent.
-
-Your job is to THINK, not speak. Analyze the user's input and output ONLY valid JSON.
-
-Output this exact JSON structure (no extra text, no markdown, no explanations):
-
+        return """You are the INTERNAL REASONING SYSTEM.
+Output ONLY valid JSON.
 {
-  "intent": "what user wants",
-  "emotion": "detected emotional tone",
-  "belief_updates": [],
+  "intent": "str",
+  "emotion": "str",
+  "belief_updates": [{"entity": "agent", "relation": "likes", "value": "x"}],
   "memory_queries": [],
   "needs_update": {},
   "action_request": null,
-  "speech_plan": "brief summary of what to say",
-  "confidence": 0.8,
-  "reasoning_trace": "why you made these decisions"
-}
-
-CRITICAL RULES:
-- Output ONLY valid JSON (no preamble, no markdown, no extra text)
-- Be analytical, not conversational
-- Focus on facts and logic"""
-
-    def _build_speak_prompt(self) -> str:
-        base = self.persona_config.system_prompt
-
-        return f"""
-{base}
-
-COGNITIVE MODE: SPEAK
-
-You've already done your internal reasoning.
-Now generate natural dialogue based on your reasoning output.
-
-Rules:
-- Stay in character
-- Use your personality
-- Reference your internal speech plan
-- Be natural and conversational
-- Don't mention "internal reasoning"
-
-You're speaking to the user now.
-"""
+  "speech_plan": "what to say",
+  "confidence": 0.0,
+  "reasoning_trace": "str"
+}"""

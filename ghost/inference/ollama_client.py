@@ -37,7 +37,8 @@ class OllamaClient:
         messages: List[Message],
         temperature: float = 0.8,
         max_tokens: int = 200,
-        stop_tokens: List[str] = None
+        stop_tokens: List[str] = None,
+        json_mode: bool = False  
     ) -> str:
         url = f"{self.base_url}/api/chat"
 
@@ -53,6 +54,7 @@ class OllamaClient:
             "model": self.model,
             "messages": ollama_messages,
             "stream": False,
+            "format": "json" if json_mode else None,  
             "options": {
                 "temperature": temperature,
                 "num_predict": max_tokens,

@@ -22,8 +22,8 @@ class PersonaConfig:
     """Persona configuration."""
     name: str = "Korone"
     system_prompt: str = ""
-    temperature: float = 0.88
-    top_k: int = 50
+    temperature: float = 0.72
+    top_k: int = 40
     repeat_penalty: float = 1.2
     
     # Emotional defaults
@@ -33,7 +33,13 @@ class PersonaConfig:
 
     max_output_tokens: int = 150  # Default low to prevent rambling
     stop_tokens: List[str] = field(default_factory=lambda: [
-        "<|im_end|>", "<|im_start|>", "User:", "### Instruction:"
+        "<|im_end|>", 
+        "<|im_start|>", 
+        "User:", 
+        "user:", 
+        "System:",
+        "\nUser", 
+        "\n\n"
     ])
 
 
