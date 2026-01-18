@@ -1,0 +1,69 @@
+# Activity Monitoring Configuration
+# Maps process names to human-readable activity descriptions
+# 
+# Usage:
+#   - Process names are case-insensitive
+#   - Descriptions should be short and contextual
+#   - The AI will use these descriptions in conversation
+#
+# Format:
+#   "ProcessName.exe": "Activity description"
+
+# === GAMING ===
+processes:
+  # Rocket League
+  "RocketLeague.exe": "Playing Rocket League (probably missing aerials)"
+  "rocketleague.exe": "Playing Rocket League (probably missing aerials)"
+  
+  # Other Games
+  "csgo.exe": "Playing CS:GO"
+  "valorant.exe": "Playing Valorant"
+  "leagueoflegends.exe": "Playing League of Legends"
+  "overwatch.exe": "Playing Overwatch"
+  "minecraft.exe": "Playing Minecraft"
+  
+  # === DEVELOPMENT ===
+  # Editors & IDEs
+  "Code.exe": "Coding in VS Code (or just staring at code)"
+  "code.exe": "Coding in VS Code (or just staring at code)"
+  "pycharm64.exe": "Using PyCharm"
+  "idea64.exe": "Using IntelliJ IDEA"
+  "sublime_text.exe": "Using Sublime Text"
+  "notepad++.exe": "Using Notepad++"
+  
+  # Terminals
+  "WindowsTerminal.exe": "Running commands in terminal"
+  "cmd.exe": "Using command prompt"
+  "powershell.exe": "Using PowerShell"
+  
+  # === COMMUNICATION ===
+  "Discord.exe": "Chatting on Discord"
+  "discord.exe": "Chatting on Discord"
+  "Slack.exe": "Working in Slack"
+  "Teams.exe": "In a Teams meeting (probably muted)"
+  
+  # === BROWSERS ===
+  "firefox.exe": "Browsing with Firefox"
+  "chrome.exe": "Browsing with Chrome (RIP RAM)"
+  "msedge.exe": "Using Edge"
+  "brave.exe": "Browsing with Brave"
+  
+  # === MEDIA ===
+  "spotify.exe": "Listening to Spotify"
+  "vlc.exe": "Watching something in VLC"
+  "obs64.exe": "Streaming or recording with OBS"
+  
+  # === PRODUCTIVITY ===
+  "EXCEL.EXE": "Working in Excel"
+  "WINWORD.EXE": "Writing in Word"
+  "POWERPNT.EXE": "Making a PowerPoint"
+  "notion.exe": "Organizing in Notion"
+  
+  # === CREATIVE ===
+  "photoshop.exe": "Editing in Photoshop"
+  "premiere.exe": "Editing video in Premiere"
+  "blender.exe": "3D modeling in Blender"
+  
+# Optional Settings
+poll_interval_seconds: 5  # How often to check processes
+include_background_apps: false  # Set to true to detect background processes too

@@ -117,17 +117,16 @@ class CognitiveOrchestrator:
     
     async def handle_message(self, event: MessageReceived) -> Optional[str]:
         """
-        Handle user message with full cognitive pipeline + WILLPOWER CHECK.
+        Handle user message with full cognitive pipeline (NO ENERGY GATING).
         
         Pipeline:
             1. Context gathering (memory + sensors + BELIEFS + NEEDS)
-            2. Willpower check (energy gating)
-            3. Think stage (internal reasoning with EGO AWARENESS)
-            4. Validation (reality check)
-            5. Speak stage (character dialogue)
-            6. Belief updates (USER + AGENT)
-            7. Memory storage
-            8. Need satisfaction (METABOLIC CONSEQUENCES)
+            2. Think stage (internal reasoning with EGO AWARENESS)
+            3. Validation (reality check)
+            4. Speak stage (character dialogue)
+            5. Belief updates (USER + AGENT)
+            6. Memory storage
+            7. Need satisfaction (METABOLIC CONSEQUENCES - NO ENERGY COST)
         """
         try:
             self._last_message_time = datetime.now(timezone.utc)
@@ -139,25 +138,6 @@ class CognitiveOrchestrator:
             
             # Pause monitoring during inference
             await self.cryostasis.stop_monitoring()
-            
-            # === WILLPOWER CHECK (NEW) ===
-            # Check if agent has energy to respond
-            can_respond, refusal_reason = self.bdi_engine.check_willpower(task_cost=0.15)
-            
-            if not can_respond:
-                logger.warning(f"⚡ Energy too low, refusing task: {refusal_reason}")
-                
-                # Resume monitoring
-                await self.cryostasis.start_monitoring()
-                
-                # Emit refusal response
-                await self.event_bus.publish(ResponseGenerated(
-                    content=refusal_reason,
-                    context_used=[],
-                    generation_time_ms=0.0
-                ))
-                
-                return refusal_reason
             
             # Step 1: Gather context (INCLUDING BELIEFS + NEEDS)
             context = await self._gather_context(event.content)
@@ -191,7 +171,7 @@ class CognitiveOrchestrator:
             # Step 5: Store memory
             await self._store_interaction(event, speech)
             
-            # Step 6: Satisfy needs (METABOLIC CONSEQUENCES)
+            # Step 6: Satisfy needs (NO ENERGY COST)
             await self._satisfy_needs(think_output)
             
             # Resume monitoring
@@ -359,7 +339,7 @@ class CognitiveOrchestrator:
             # Log when agent updates its own beliefs
             if entity == 'agent':
                 logger.info(
-                    f"🧠 PERSONALITY UPDATE: Agent believes "
+                    f"PERSONALITY UPDATE: Agent believes "
                     f"({relation}, {value})"
                 )
             
@@ -404,9 +384,9 @@ class CognitiveOrchestrator:
     
     async def _satisfy_needs(self, think_output: ThinkOutput):
         """
-        Update BDI needs from interaction (METABOLIC CONSEQUENCES).
+        Update BDI needs from interaction (METABOLIC CONSEQUENCES - NO ENERGY).
         
-        Actions consume energy and satisfy needs.
+        Actions satisfy needs without energy costs.
         """
         
         # Social interaction satisfies social need
@@ -416,17 +396,9 @@ class CognitiveOrchestrator:
         if '?' in think_output.speech_plan:
             await self.bdi_engine.update_need('curiosity', 0.1)
         
-        # Energy cost of thinking (METABOLIC COST)
-        await self.bdi_engine.update_need('energy', 0.1)
-        
         # Process need updates from think output
         for need_name, delta in think_output.needs_update.items():
             await self.bdi_engine.update_need(need_name, delta)
-        
-        # Log energy state
-        needs = self.bdi_engine.get_need_state()
-        if needs['energy'] > 0.7:
-            logger.warning(f"⚡ Energy low: {needs['energy']:.2f}")
     
     async def handle_impulse(self, event: ProactiveImpulse) -> Optional[str]:
         """Handle autonomous impulse (from BDI engine)."""

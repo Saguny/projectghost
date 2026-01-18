@@ -130,12 +130,6 @@ class BDIEngine:
                 decay_rate=0.08,  # 8% per hour
                 threshold_trigger=0.6
             ),
-            'energy': Need(
-                name='energy',
-                value=0.2,  # Low value = high energy (satisfied)
-                decay_rate=0.05,  # 5% per hour (fatigue)
-                threshold_trigger=0.7  # When > 0.7, energy is critical
-            ),
             'affiliation': Need(
                 name='affiliation',
                 value=0.5,
@@ -206,7 +200,7 @@ class BDIEngine:
         critical = [n for n in self.needs.values() if n.is_critical()]
         if critical:
             logger.info(
-                f"🔴 Critical needs: {', '.join(n.name for n in critical)} "
+                f"Critical needs: {', '.join(n.name for n in critical)} "
                 f"[{', '.join(f'{n.name}={n.value:.2f}' for n in critical)}]"
             )
     
@@ -226,10 +220,6 @@ class BDIEngine:
         # Curiosity desire
         if self.needs['curiosity'].is_critical():
             desires.append('seek_knowledge')
-        
-        # Energy management (CONSEQUENTIAL)
-        if self.needs['energy'].is_critical():
-            desires.append('conserve_energy')
         
         # Affiliation desire
         if self.needs['affiliation'].is_critical():
@@ -251,9 +241,8 @@ class BDIEngine:
         if time_since_last < min_interval:
             return None
         
-        # Priority ranking
+        # Priority ranking (energy removed)
         priority_map = {
-            'conserve_energy': 0.9,  # High priority (survival)
             'seek_interaction': 0.7,  # Medium-high (social starvation)
             'strengthen_bond': 0.6,
             'seek_knowledge': 0.5
@@ -271,9 +260,8 @@ class BDIEngine:
         
         primary_desire = desires_sorted[0]
         
-        # Map desires to actions
+        # Map desires to actions (no rest action)
         action_map = {
-            'conserve_energy': 'rest',
             'seek_interaction': 'initiate_conversation',
             'strengthen_bond': 'share_thought',
             'seek_knowledge': 'ask_question'
@@ -313,22 +301,16 @@ class BDIEngine:
     
     async def _execute_action(self, intention: Intention) -> bool:
         """
-        Execute a specific intention (WITH METABOLIC CONSEQUENCES).
+        Execute a specific intention (METABOLIC CONSEQUENCES - NO ENERGY COSTS).
         """
         action = intention.action
         
         logger.info(
-            f"🎯 Executing intention: {action} "
+            f"Executing intention: {action} "
             f"(motivation: {intention.motivation}, priority: {intention.priority:.2f})"
         )
         
-        if action == 'rest':
-            # Rest: Do nothing, recover energy
-            self.needs['energy'].satisfy(0.3)
-            logger.info("💤 Resting (energy recovery)")
-            return True
-        
-        elif action == 'initiate_conversation':
+        if action == 'initiate_conversation':
             # Initiate social interaction (SATISFIES SOCIAL NEED)
             trigger_reason = self._get_conversation_trigger(intention.motivation)
             
@@ -337,12 +319,10 @@ class BDIEngine:
                 confidence=intention.priority
             ))
             
-            # CONSEQUENCE: Satisfy social need
+            # CONSEQUENCE: Satisfy social need (no energy cost)
             self.needs['social'].satisfy(0.5)
-            # COST: Consume energy
-            self.needs['energy'].value = min(1.0, self.needs['energy'].value + 0.1)
             
-            logger.info(f"📞 Initiated conversation (social: {self.needs['social'].value:.2f})")
+            logger.info(f"Initiated conversation (social: {self.needs['social'].value:.2f})")
             return True
         
         elif action == 'share_thought':
@@ -354,10 +334,8 @@ class BDIEngine:
                 confidence=intention.priority
             ))
             
-            # CONSEQUENCE: Satisfy affiliation
+            # CONSEQUENCE: Satisfy affiliation (no energy cost)
             self.needs['affiliation'].satisfy(0.4)
-            # COST: Consume energy
-            self.needs['energy'].value = min(1.0, self.needs['energy'].value + 0.08)
             
             return True
         
@@ -370,10 +348,8 @@ class BDIEngine:
                 confidence=intention.priority
             ))
             
-            # CONSEQUENCE: Satisfy curiosity
+            # CONSEQUENCE: Satisfy curiosity (no energy cost)
             self.needs['curiosity'].satisfy(0.3)
-            # COST: Consume energy
-            self.needs['energy'].value = min(1.0, self.needs['energy'].value + 0.05)
             
             return True
         
@@ -382,12 +358,11 @@ class BDIEngine:
             return False
     
     def _get_conversation_trigger(self, motivation: str) -> str:
-        """Generate context-appropriate trigger reason."""
+        """Generate context-appropriate trigger reason (energy removed)."""
         triggers = {
             'seek_interaction': "haven't talked in a while, wanted to check in",
             'strengthen_bond': "thinking about you",
-            'seek_knowledge': "curious about what you're up to",
-            'conserve_energy': "feeling low energy"
+            'seek_knowledge': "curious about what you're up to"
         }
         
         return triggers.get(motivation, "spontaneous impulse")
@@ -422,21 +397,13 @@ class BDIEngine:
     
     def check_willpower(self, task_cost: float = 0.2) -> tuple[bool, str]:
         """
-        Check if agent has enough energy to perform a task.
+        Check if agent has enough willpower to perform a task.
+        
+        Energy system removed - always return True.
         
         Returns:
-            (can_perform, reason)
+            (True, "") - Agent is always willing
         """
-        energy_need = self.needs['energy'].value
-        
-        # If energy is critical and task is expensive, refuse
-        if energy_need > 0.8 and task_cost > 0.1:
-            return False, "I'm too tired right now, can we do this later?"
-        
-        # If energy is very low, warn but allow
-        if energy_need > 0.6:
-            return True, "I'm a bit tired, but I can help"
-        
         return True, ""
     
     def _save_state(self):
@@ -502,6 +469,8 @@ class BDIEngine:
             self._last_action = safe_parse_time(last_act, current_time)
             
             logger.info("✓ Loaded BDI state from disk")
+    
+    
             
         except Exception as e:
             logger.warning(f"Failed to load BDI state (using defaults): {e}")

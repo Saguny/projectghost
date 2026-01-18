@@ -159,6 +159,22 @@ Time Context: {circadian}
 Respond naturally according to this emotional state.
 """
         
+        # === CRITICAL: MAKE SENSORY CONTEXT EXPLICIT ===
+        # This is what you KNOW about the user RIGHT NOW
+        sensory_instruction = ""
+        if sensory_context and sensory_context.strip():
+            sensory_instruction = f"""
+╔════════════════════════════════════════════════════════════╗
+║              CURRENT REALITY (FACTUAL TRUTH)               ║
+╚════════════════════════════════════════════════════════════╝
+
+{sensory_context}
+
+☞ This is FACTUAL. Do NOT guess or hallucinate.
+☞ If asked "what am I doing?", reference the above EXACTLY.
+☞ If activity changes (e.g., gaming started), you should NOTICE.
+"""
+        
         # Integrate memories into narrative
         memory_context = ""
         if semantic_memories:
@@ -181,7 +197,8 @@ Respond naturally according to this emotional state.
 
 {emotional_instruction}
 
-{sensory_context}
+{sensory_instruction}
+
 {memory_context}
 
 CRITICAL INSTRUCTIONS:

@@ -6,7 +6,7 @@ import random
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from ghost.core.events import EventBus, ProactiveImpulse, MessageReceived
+from ghost.core.events import EventBus, ProactiveImpulse, MessageReceived, UserActivityChanged
 from ghost.core.config import AutonomyConfig
 from ghost.emotion.emotion_service import EmotionService
 from ghost.autonomy.triggers import TriggerEvaluator
@@ -34,10 +34,17 @@ class AutonomyEngine:
         self._last_initiation_time: Optional[datetime] = None
         self._running = False
         
+        # Activity tracking (to prevent spam)
+        self._last_activity_reaction: Optional[datetime] = None
+        self._activity_cooldown_minutes = 15  # Don't spam about the same activity
+        
         # Subscribe to message events to track activity
         self.event_bus.subscribe(MessageReceived, self._on_message_received)
         
-        logger.info("Autonomy engine initialized")
+        # Subscribe to activity changes (NEW)
+        self.event_bus.subscribe(UserActivityChanged, self._on_activity_changed)
+        
+        logger.info("Autonomy engine initialized with activity awareness")
     
     async def start(self):
         """Start autonomy monitoring."""
@@ -64,6 +71,88 @@ class AutonomyEngine:
         """Update trigger state when messages are received."""
         self.trigger_evaluator.update_last_message_time()
         logger.debug("Updated last message time for autonomy triggers")
+    
+    async def _on_activity_changed(self, event: UserActivityChanged):
+        """
+        React to user activity changes (NEW FEATURE).
+        
+        Triggers:
+        - User starts gaming → Comment on the game
+        - User switches from gaming to coding → Tease about rage quitting
+        - User goes idle after gaming → Ask how it went
+        """
+        logger.info(
+            f"Activity change detected: {event.old_activity} → {event.new_activity} "
+            f"({event.app_name or 'N/A'})"
+        )
+        
+        # Check cooldown to prevent spam
+        if self._last_activity_reaction:
+            time_since_last = datetime.now(timezone.utc) - self._last_activity_reaction
+            if time_since_last < timedelta(minutes=self._activity_cooldown_minutes):
+                logger.debug(
+                    f"Activity reaction cooldown active "
+                    f"({time_since_last.total_seconds()/60:.1f}min)"
+                )
+                return
+        
+        # Determine if this is worth reacting to
+        should_react, trigger_reason = self._evaluate_activity_change(event)
+        
+        if should_react:
+            logger.info(f"🎯 Reacting to activity change: {trigger_reason}")
+            
+            # Fire proactive impulse
+            await self.event_bus.publish(ProactiveImpulse(
+                trigger_reason=trigger_reason,
+                confidence=0.8
+            ))
+            
+            self._last_activity_reaction = datetime.now(timezone.utc)
+            self._last_initiation_time = datetime.now(timezone.utc)
+    
+    def _evaluate_activity_change(
+        self,
+        event: UserActivityChanged
+    ) -> tuple[bool, str]:
+        """
+        Decide if activity change warrants a reaction.
+        
+        Returns:
+            (should_react, trigger_reason)
+        """
+        old = event.old_activity.lower()
+        new = event.new_activity.lower()
+        app = event.app_name.lower() if event.app_name else ""
+        
+        # === GAMING TRIGGERS ===
+        if new == "gaming":
+            # User started gaming
+            if "rocket" in app:
+                return True, "noticed you launched rocket league (time to miss aerials?)"
+            elif "league" in app:
+                return True, "league of legends? rip your mental"
+            else:
+                return True, f"starting {app}? gl hf"
+        
+        # Gaming → Coding (rage quit?)
+        if old == "gaming" and new == "coding":
+            return True, "gave up on the game already? <SPLIT> back to copy pasting ai code?"
+        
+        # Gaming → Idle (how'd it go?)
+        if old == "gaming" and new == "idle":
+            return True, "done gaming? did you rank up or tilt queue?"
+        
+        # === CODING TRIGGERS ===
+        if new == "coding" and old != "coding":
+            return True, "time to write some code <SPLIT> or just add comments?"
+        
+        # === IDLE TRIGGERS ===
+        if new == "idle" and old in ["gaming", "coding"]:
+            return True, "taking a break? go touch grass"
+        
+        # Default: Not significant enough
+        return False, ""
     
     async def _autonomy_loop(self):
         """Main autonomy monitoring loop."""

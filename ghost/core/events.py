@@ -94,6 +94,14 @@ class AutonomousMessageSent(Event):
     channel_id: str = ""
 
 
+@dataclass
+class UserActivityChanged(Event):
+    """User activity state changed (e.g., started gaming)."""
+    old_activity: str = ""
+    new_activity: str = ""
+    app_name: str = ""
+
+
 class EventBus:
     """Central event bus for system-wide communication with backpressure."""
     

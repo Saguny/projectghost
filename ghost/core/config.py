@@ -31,7 +31,7 @@ class PersonaConfig:
     default_arousal: float = 0.7
     default_dominance: float = 0.5
 
-    max_output_tokens: int = 150  # Default low to prevent rambling
+    max_output_tokens: int = 150
     stop_tokens: List[str] = field(default_factory=lambda: [
         "<|im_end|>", 
         "<|im_start|>", 
@@ -52,7 +52,7 @@ class CryostasisConfig:
     cpu_threshold_percent: int = 60
     vram_threshold_mb: int = 14000
     blacklist_processes: List[str] = field(default_factory=lambda: ["notepad.exe"])
-    wake_cooldown_seconds: int = 10  # Reduced from 30
+    wake_cooldown_seconds: int = 10
 
 
 @dataclass
@@ -65,7 +65,7 @@ class MemoryConfig:
     
     # Advanced memory settings
     enable_hierarchical: bool = True
-    consolidation_threshold: int = 40  # FIXED: Was 50, same as buffer size
+    consolidation_threshold: int = 40
     enable_summarization: bool = True
     enable_importance_scoring: bool = True
     importance_threshold: float = 0.4
@@ -89,7 +89,7 @@ class AutonomyConfig:
     min_interval_minutes: int = 60
     trigger_probability: float = 0.4
     check_interval_seconds: int = 30
-    silence_threshold_minutes: int = 180  # 3 hours
+    silence_threshold_minutes: int = 180
 
 
 @dataclass
@@ -106,10 +106,19 @@ class DiscordConfig:
 class EmotionConfig:
     """Emotion system configuration."""
     pad_decay_rate: float = 0.05
-    time_based_decay: bool = True  # Decay based on time, not messages
-    decay_interval_seconds: int = 300  # 5 minutes
+    time_based_decay: bool = True
+    decay_interval_seconds: int = 300
     enable_circadian: bool = True
-    circadian_update_interval_seconds: int = 3600  # 1 hour
+    circadian_update_interval_seconds: int = 3600
+
+
+@dataclass
+class ActivityConfig:
+    """Activity monitoring configuration."""
+    enabled: bool = True
+    process_map: Dict[str, str] = field(default_factory=dict)
+    poll_interval_seconds: int = 5
+    include_background_apps: bool = False
 
 
 @dataclass
@@ -126,6 +135,7 @@ class SystemConfig:
     autonomy: AutonomyConfig = field(default_factory=AutonomyConfig)
     discord: DiscordConfig = field(default_factory=DiscordConfig)
     emotion: EmotionConfig = field(default_factory=EmotionConfig)
+    activity: ActivityConfig = field(default_factory=ActivityConfig)
 
 
 def load_config() -> SystemConfig:
@@ -178,6 +188,9 @@ def load_config() -> SystemConfig:
         os.getenv("TRIGGER_PROBABILITY", str(config.autonomy.trigger_probability))
     )
     
+    # Activity config
+    config.activity.enabled = os.getenv("ACTIVITY_SENSOR_ENABLED", "true").lower() == "true"
+    
     # Load persona from YAML if exists
     persona_path = Path("config/personas.yaml")
     if persona_path.exists():
@@ -186,6 +199,27 @@ def load_config() -> SystemConfig:
             if "personas" in persona_data and "default" in persona_data["personas"]:
                 p = persona_data["personas"]["default"]
                 config.persona = PersonaConfig(**p)
+    
+    # Load activity mappings from YAML if exists
+    activity_path = Path("config/activities.yaml")
+    if activity_path.exists():
+        try:
+            with open(activity_path) as f:
+                activity_data = yaml.safe_load(f)
+                if activity_data and "processes" in activity_data:
+                    config.activity.process_map = activity_data["processes"]
+                    
+                    # Optional settings
+                    if "poll_interval_seconds" in activity_data:
+                        config.activity.poll_interval_seconds = activity_data["poll_interval_seconds"]
+                    if "include_background_apps" in activity_data:
+                        config.activity.include_background_apps = activity_data["include_background_apps"]
+        except Exception as e:
+            # Graceful degradation: Log warning but continue with empty map
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Failed to load activities.yaml: {e}. Activity sensor will use defaults."
+            )
     
     return config
 
@@ -234,5 +268,9 @@ def validate_config(config: SystemConfig) -> List[str]:
     
     if config.cryostasis.cpu_threshold_percent < 0 or config.cryostasis.cpu_threshold_percent > 100:
         errors.append("cpu_threshold_percent must be between 0 and 100")
+    
+    # Activity validation
+    if config.activity.poll_interval_seconds < 1:
+        errors.append("activity poll_interval_seconds must be at least 1")
     
     return errors
